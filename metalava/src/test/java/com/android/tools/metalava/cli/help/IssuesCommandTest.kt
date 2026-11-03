@@ -78,6 +78,7 @@ Available Issues                             |  Category                        
   ChangedNative                              |  other_compatibility                  |   hidden
   ChangedRecordComponent                     |  binary_and_source_compatibility      |   error
   ChangedScope                               |  binary_and_source_compatibility      |   error
+  ChangedSdkExtensionApi                     |  other_compatibility                  |   warning
   ChangedStatic                              |  binary_and_source_compatibility      |   error
   ChangedSuperclass                          |  binary_and_source_compatibility      |   error
   ChangedThrows                              |  source_compatibility_only            |   error

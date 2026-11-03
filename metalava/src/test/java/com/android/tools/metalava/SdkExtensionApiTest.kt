@@ -527,4 +527,292 @@ class SdkExtensionApiTest : DriverTest() {
                 ),
         )
     }
+
+    @Test
+    fun `Test CompatibilityCheck warns on SdkExtensionApi changes`() {
+        check(
+            extraArguments = arrayOf(ARG_STUB_PACKAGES, "test.pkg*"),
+            checkCompatibilityApiReleased =
+                """
+                    // Signature format: 5.0
+                    package test.pkg {
+                      public class Foo {
+                        ctor public Foo();
+                        method public void addedAnnotation();
+                        method @SdkExtensionApi(33) public void droppedAnnotation();
+                        method @SdkExtensionApi(34) public void loweredFloor();
+                        method @SdkExtensionApi(33) public void raisedFloor();
+                        method @SdkExtensionApi(33) public void switchedToAdServices();
+                        method @SdkExtensionApi(33) public void unchangedFloor();
+                      }
+                      public class PromotedToClass {
+                        ctor @SdkExtensionApi(33) public PromotedToClass();
+                        method @SdkExtensionApi(33) public void keptViaClass();
+                      }
+                    }
+                """,
+            expectedIssues =
+                """
+                    src/test/pkg/Foo.java:12: warning: Method test.pkg.Foo.droppedAnnotation() has removed @SdkExtensionApi(33) [ChangedSdkExtensionApi]
+                    src/test/pkg/Foo.java:14: warning: Method test.pkg.Foo.loweredFloor() has changed @SdkExtensionApi floor from 34 to 33 [ChangedSdkExtensionApi]
+                    src/test/pkg/Foo.java:17: warning: Method test.pkg.Foo.raisedFloor() has changed @SdkExtensionApi floor from 33 to 34 [ChangedSdkExtensionApi]
+                    src/test/pkg/Foo.java:20: warning: Method test.pkg.Foo.switchedToAdServices() has changed @SdkExtensionApi floor from 33 to 1000000 [ChangedSdkExtensionApi]
+                """,
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import android.os.ext.SdkExtensions;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            public class Foo {
+                                public Foo() {}
+
+                                @SdkExtensionApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                                public void addedAnnotation() {}
+                                public void droppedAnnotation() {}
+
+                                @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                                public void loweredFloor() {}
+
+                                @SdkExtensionApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                                public void raisedFloor() {}
+
+                                @SdkExtensionApi(SdkExtensions.AD_SERVICES)
+                                public void switchedToAdServices() {}
+
+                                @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                                public void unchangedFloor() {}
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                            public class PromotedToClass {
+                                public PromotedToClass() {}
+                                public void keptViaClass() {}
+                            }
+                        """
+                    ),
+                    versionCodesSource,
+                    sdkExtensionsSource,
+                    sdkExtensionApiSource,
+                ),
+        )
+    }
+
+    @Test
+    fun `Test CompatibilityCheck warns on class and field SdkExtensionApi changes`() {
+        check(
+            extraArguments = arrayOf(ARG_STUB_PACKAGES, "test.pkg*"),
+            checkCompatibilityApiReleased =
+                """
+                    // Signature format: 5.0
+                    package test.pkg {
+                      public class Fields {
+                        ctor public Fields();
+                        field @SdkExtensionApi(33) public static final int droppedField = 1; // 0x1
+                        field @SdkExtensionApi(33) public static final int raisedField = 2; // 0x2
+                        field @SdkExtensionApi(33) public static final int unchangedField = 3; // 0x3
+                      }
+                      @SdkExtensionApi(33) public class MemberDropsOverride {
+                        ctor public MemberDropsOverride();
+                        method @SdkExtensionApi(34) public void droppedOverride();
+                      }
+                      @SdkExtensionApi(33) public class RaisedClass {
+                        ctor public RaisedClass();
+                        method public void inheritsClassFloor();
+                        field public static final int INHERITS_CLASS_FLOOR = 1; // 0x1
+                      }
+                      @SdkExtensionApi(33) public static class RaisedClass.Nested {
+                        ctor public RaisedClass.Nested();
+                      }
+                      @SdkExtensionApi(33) public class RemovedClass {
+                        ctor public RemovedClass();
+                        method public void inheritsClassFloor();
+                      }
+                    }
+                """,
+            // Changes to a class floor are only reported on the class, not on the members and
+            // nested classes that inherit the floor from it, e.g.
+            // `RaisedClass.inheritsClassFloor()`,
+            // `RaisedClass.INHERITS_CLASS_FLOOR`, `RaisedClass.Nested` and
+            // `RemovedClass.inheritsClassFloor()`. Removing a member's own floor so that it
+            // inherits
+            // a different floor from its class, e.g. `MemberDropsOverride.droppedOverride()`, is
+            // reported on the member. `Fields.unchangedField` is not reported.
+            expectedIssues =
+                """
+                    src/test/pkg/Fields.java:9: warning: Field test.pkg.Fields.droppedField has removed @SdkExtensionApi(33) [ChangedSdkExtensionApi]
+                    src/test/pkg/Fields.java:11: warning: Field test.pkg.Fields.raisedField has changed @SdkExtensionApi floor from 33 to 34 [ChangedSdkExtensionApi]
+                    src/test/pkg/MemberDropsOverride.java:9: warning: Method test.pkg.MemberDropsOverride.droppedOverride() has changed @SdkExtensionApi floor from 34 to 33 [ChangedSdkExtensionApi]
+                    src/test/pkg/RaisedClass.java:6: warning: Class test.pkg.RaisedClass has changed @SdkExtensionApi floor from 33 to 34 [ChangedSdkExtensionApi]
+                    src/test/pkg/RemovedClass.java:3: warning: Class test.pkg.RemovedClass has removed @SdkExtensionApi(33) [ChangedSdkExtensionApi]
+                """,
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            public class Fields {
+                                public Fields() {}
+
+                                public static final int droppedField = 1;
+
+                                @SdkExtensionApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                                public static final int raisedField = 2;
+
+                                @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                                public static final int unchangedField = 3;
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                            public class MemberDropsOverride {
+                                public MemberDropsOverride() {}
+                                public void droppedOverride() {}
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            @SdkExtensionApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                            public class RaisedClass {
+                                public RaisedClass() {}
+                                public void inheritsClassFloor() {}
+                                public static final int INHERITS_CLASS_FLOOR = 1;
+
+                                public static class Nested {
+                                    public Nested() {}
+                                }
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            public class RemovedClass {
+                                public RemovedClass() {}
+                                public void inheritsClassFloor() {}
+                            }
+                        """
+                    ),
+                    versionCodesSource,
+                    sdkExtensionApiSource,
+                ),
+        )
+    }
+
+    @Test
+    fun `Test CompatibilityCheck warns on SdkExtensionApi changes when members move to a super class`() {
+        check(
+            extraArguments = arrayOf(ARG_STUB_PACKAGES, "test.pkg*"),
+            checkCompatibilityApiReleased =
+                """
+                    // Signature format: 5.0
+                    package test.pkg {
+                      @SdkExtensionApi(34) public class AnnotatedBase {
+                        ctor public AnnotatedBase();
+                      }
+                      @SdkExtensionApi(33) public class AnnotatedSub extends test.pkg.AnnotatedBase {
+                        ctor public AnnotatedSub();
+                        method public void movedToAnnotatedBase();
+                      }
+                      public class UnannotatedBase {
+                        ctor public UnannotatedBase();
+                      }
+                      @SdkExtensionApi(33) public class UnannotatedSub extends test.pkg.UnannotatedBase {
+                        ctor public UnannotatedSub();
+                        method public void movedToUnannotatedBase();
+                      }
+                    }
+                """,
+            // When a member is moved to a super class, ComparisonVisitor compares the old member
+            // with a duplicate of the super class member whose containing class is the sub class,
+            // so the effective floor of the moved member is still inherited from the sub class and
+            // is unchanged.
+            expectedIssues = "",
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            @SdkExtensionApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                            public class AnnotatedBase {
+                                public AnnotatedBase() {}
+                                public void movedToAnnotatedBase() {}
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                            public class AnnotatedSub extends AnnotatedBase {
+                                public AnnotatedSub() {}
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            public class UnannotatedBase {
+                                public UnannotatedBase() {}
+                                public void movedToUnannotatedBase() {}
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.os.Build;
+                            import $ANDROID_SDK_EXTENSION_API;
+
+                            @SdkExtensionApi(Build.VERSION_CODES.TIRAMISU)
+                            public class UnannotatedSub extends UnannotatedBase {
+                                public UnannotatedSub() {}
+                            }
+                        """
+                    ),
+                    versionCodesSource,
+                    sdkExtensionApiSource,
+                ),
+        )
+    }
 }
