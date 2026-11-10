@@ -76,6 +76,9 @@ object Issues {
     val CHANGED_CLASS by Issue(Severity.ERROR, Category.BINARY_AND_SOURCE_COMPATIBILITY)
     val CHANGED_DEPRECATED by Issue(Severity.HIDDEN, Category.SOURCE_COMPATIBILITY_ONLY)
     val CHANGED_ANNOTATION_RETENTION by Issue(Severity.ERROR, Category.OTHER_COMPATIBILITY)
+    // Changing the `@SdkExtensionApi` floor does not break binary or source compatibility but does
+    // change the SDK extensions in which the API is reported as being available.
+    val CHANGED_SDK_EXTENSION_API by Issue(Severity.WARNING, Category.OTHER_COMPATIBILITY)
     val ADDED_FINAL_UNINSTANTIABLE by Issue(Severity.HIDDEN, Category.OTHER_COMPATIBILITY)
     val REMOVED_FINAL by Issue(Severity.ERROR, Category.BINARY_COMPATIBILITY_ONLY)
     val REMOVED_FINAL_STRICT by Issue(Severity.ERROR, Category.OTHER_COMPATIBILITY)
