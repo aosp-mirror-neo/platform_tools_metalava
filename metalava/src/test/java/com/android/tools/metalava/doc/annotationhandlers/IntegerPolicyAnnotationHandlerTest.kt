@@ -34,21 +34,11 @@ class IntegerPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.IntegerPolicyDefinition;
-                        import android.processor.devicepolicy.IntegerResolutionMechanism;
-                        import android.processor.devicepolicy.IntegerValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import android.processor.devicepolicy.AllowedRoles;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.Manifest.permission.TEST;
-                        import static android.Manifest.permission.MANAGE_DEVICE_POLICY_ACROSS_USERS;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy for integer policy definition with multiple scopes.
                            */
@@ -153,21 +143,11 @@ class IntegerPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.IntegerPolicyDefinition;
-                        import android.processor.devicepolicy.IntegerResolutionMechanism;
-                        import android.processor.devicepolicy.IntegerValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import android.processor.devicepolicy.AllowedRoles;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.Manifest.permission.TEST;
-                        import static android.Manifest.permission.MANAGE_DEVICE_POLICY_ACROSS_USERS;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy for integer policy definition with multiple scopes.
                            */
@@ -277,17 +257,11 @@ class IntegerPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.IntegerPolicyDefinition;
-                        import android.processor.devicepolicy.IntegerResolutionMechanism;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.Manifest.permission.TEST;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy with default integer validation.
                            */

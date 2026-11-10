@@ -34,18 +34,11 @@ class LongPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.LongPolicyDefinition;
-                        import android.processor.devicepolicy.LongResolutionMechanism;
-                        import android.processor.devicepolicy.LongValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import android.processor.devicepolicy.AllowedRoles;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy for long policy definition.
                            *
@@ -148,16 +141,11 @@ class LongPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.LongPolicyDefinition;
-                        import android.processor.devicepolicy.LongResolutionMechanism;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy with default long validation.
                            */

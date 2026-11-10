@@ -33,19 +33,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import android.processor.devicepolicy.AllowedRoles;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy for string policy definition with multiple scopes.
                            */
@@ -140,18 +132,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int SCOPE_PARENT_USER = 3;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy for string policy definition with a scope not settable by any DPC.
                            */
@@ -244,18 +229,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int SCOPE_PARENT_USER = 3;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy.
                            */
@@ -347,17 +325,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy.
                            */
@@ -447,18 +419,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int SCOPE_LOGIN_SCREEN = 4;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy.
                            */
@@ -556,19 +521,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int SCOPE_LOGIN_SCREEN = 4;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy.
                            */
@@ -673,19 +630,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.StringValidation;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import android.processor.devicepolicy.AllowedRoles;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
-                        import static android.Manifest.permission.TEST;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_USER = 1;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy for string policy definition.
                            */
@@ -784,16 +733,11 @@ class StringPolicyAnnotationHandlerTest : DriverTest() {
                     java(
                         """
                         package test.pkg;
-                        import android.processor.devicepolicy.StringPolicyDefinition;
-                        import android.processor.devicepolicy.PolicyDefinition;
-                        import android.processor.devicepolicy.AllowedDpcTypes;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.ALLOWED;
-                        import static android.processor.devicepolicy.AllowedDpcTypes.DISALLOWED;
+                        $POLICY_IMPORTS
 
                         @Retention(RetentionPolicy.SOURCE)
                         public class TestPolicy {
-                            private static final int SCOPE_DEVICE = 2;
-                            private static final int RESOURCE_DEVICE_WIDE = 1;
+                            $POLICY_DEFINES
                           /**
                            * A test policy with default string validation.
                            */
