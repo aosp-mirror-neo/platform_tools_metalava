@@ -48,7 +48,9 @@ dependencies {
     testImplementation(libs.kotlinTest)
     testImplementation(libs.kotlinTestJUnit)
 
-    testRuntimeOnly(project(":metalava-model-turbine"))
+    // Include :metalava-model-turbine in tests when available (it is only included in
+    // settings.gradle.kts when ../../external/turbine is present in the checkout).
+    findProject(":metalava-model-turbine")?.let { testRuntimeOnly(it) }
 }
 
 val testDataDir = layout.projectDirectory.dir("src/testdata")
