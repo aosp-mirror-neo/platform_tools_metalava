@@ -23,7 +23,6 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.Test
@@ -322,9 +321,7 @@ class ClassMergerTest : BaseTextCodebaseTest() {
             val genericFooClass = codebase.assertTypeAlias("test.pkg.GenericFoo")
             genericFooClass.optionalAliasedType.assertClassTypeItem {
                 arguments.single().assertVariableTypeItem {
-                    // TODO(b/584673648): The aliased type should reuse the existing class's
-                    //  TypeParameterItem instead of creating a new one.
-                    assertNotSame(genericFooClass.typeParameterList.single(), asTypeParameter)
+                    assertSame(genericFooClass.typeParameterList.single(), asTypeParameter)
                 }
             }
         }
