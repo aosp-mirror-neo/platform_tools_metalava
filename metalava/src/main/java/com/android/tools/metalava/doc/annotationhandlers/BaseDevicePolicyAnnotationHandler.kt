@@ -28,6 +28,20 @@ import com.android.tools.metalava.model.value.asAny
 import com.android.tools.metalava.reporter.Issues
 import com.android.tools.metalava.reporter.Reporter
 
+/** A single row in a policy details documentation table. */
+data class TableRow(
+    /** The label shown in the left column of the row. */
+    val label: String,
+    /** The HTML body shown in the right column of the row. */
+    val body: String,
+)
+
+/** A device policy definition capable of generating documentation rows. */
+interface DevicePolicy {
+    /** Generates the documentation table rows describing this policy under [context]. */
+    fun generateDocRows(context: DevicePolicyContext): List<TableRow>
+}
+
 /**
  * Base class for Device Policy Annotation Handlers.
  *
@@ -39,21 +53,27 @@ abstract class BaseDevicePolicyAnnotationHandler(protected val context: DevicePo
         annotation: AnnotationItem,
         item: Item,
     ): String
+
+    /** Generates the HTML documentation table for [currentVersion]. */
+    protected fun generateDocs(
+        currentVersion: DevicePolicy,
+        @Suppress("UNUSED_PARAMETER") item: Item,
+    ): String = renderTable(currentVersion.generateDocRows(context))
 }
 
-/** Renders a list of table entries into an HTML table format. */
-fun renderTable(tableEntries: List<Pair<String, String>>): String {
+/** Renders a list of table rows into an HTML table format. */
+fun renderTable(tableEntries: List<TableRow>): String {
     return buildString {
         append("\n <table>\n")
         append("  <tr>\n")
         append("    <th colspan=\"2\">Policy details</th>\n")
         append("  </tr>\n")
-        for ((name, value) in tableEntries) {
+        for ((label, body) in tableEntries) {
             append("  <tr>\n")
-            append("    <td>$name</td>\n")
-            if (value.contains('\n')) {
+            append("    <td>$label</td>\n")
+            if (body.contains('\n')) {
                 append("    <td>\n")
-                value.trimEnd('\n').split('\n').forEach { line ->
+                body.trimEnd('\n').split('\n').forEach { line ->
                     if (line.isNotEmpty()) {
                         append("      $line\n")
                     } else {
@@ -62,7 +82,7 @@ fun renderTable(tableEntries: List<Pair<String, String>>): String {
                 }
                 append("    </td>\n")
             } else {
-                append("    <td>$value</td>\n")
+                append("    <td>$body</td>\n")
             }
             append("  </tr>\n")
         }

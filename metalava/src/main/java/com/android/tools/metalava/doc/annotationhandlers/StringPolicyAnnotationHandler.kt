@@ -26,8 +26,8 @@ class StringPolicyAnnotationHandler(context: DevicePolicyContext) :
 
     /** Processes the [StringPolicyDefinitionProxy] and returns the documentation for the policy. */
     override fun processPolicyAnnotation(annotation: AnnotationItem, item: Item): String {
-        val proxy = annotation.bindTo<StringPolicyDefinitionProxy>(item)
-        return proxy?.generateDocs() ?: ""
+        val proxy = annotation.bindTo<StringPolicyDefinitionProxy>(item) ?: return ""
+        return generateDocs(proxy, item)
     }
 }
 
@@ -40,15 +40,11 @@ class StringPolicyAnnotationHandler(context: DevicePolicyContext) :
 data class StringPolicyDefinitionProxy(
     val base: PolicyDefinitionProxy,
     val validation: StringValidationProxy,
-) {
-    fun generateDocs() = buildString {
-        val tableEntries = buildList {
-            addAll(base.getTableEntries())
-            val policyValueValidations = validation.getPolicyValueValidations()
-            add(Pair("Policy value", renderPolicyValue("String", policyValueValidations)))
-        }
-
-        append(renderTable(tableEntries))
+) : DevicePolicy {
+    override fun generateDocRows(context: DevicePolicyContext): List<TableRow> = buildList {
+        addAll(base.generateDocRows())
+        val policyValueValidations = validation.getPolicyValueValidations()
+        add(TableRow("Policy value", renderPolicyValue("String", policyValueValidations)))
     }
 }
 

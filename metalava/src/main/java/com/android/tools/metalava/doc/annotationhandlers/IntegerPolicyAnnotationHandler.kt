@@ -28,8 +28,8 @@ class IntegerPolicyAnnotationHandler(context: DevicePolicyContext) :
      * Processes the [IntegerPolicyDefinitionProxy] and returns the documentation for the policy.
      */
     override fun processPolicyAnnotation(annotation: AnnotationItem, item: Item): String {
-        val proxy = annotation.bindTo<IntegerPolicyDefinitionProxy>(item)
-        return proxy?.generateDocs() ?: ""
+        val proxy = annotation.bindTo<IntegerPolicyDefinitionProxy>(item) ?: return ""
+        return generateDocs(proxy, item)
     }
 }
 
@@ -43,19 +43,15 @@ data class IntegerPolicyDefinitionProxy(
     val base: PolicyDefinitionProxy,
     val validation: IntegerValidationProxy,
     val resolutionMechanism: IntegerResolutionMechanismProxy,
-) {
-    fun generateDocs() = buildString {
-        val tableEntries = buildList {
-            addAll(base.getTableEntries())
-            val resolutionMechanismDoc = resolutionMechanism.generateDocs()
-            if (resolutionMechanismDoc.isNotEmpty()) {
-                add(Pair("Conflict resolution mechanism", resolutionMechanismDoc))
-            }
-            val policyValueValidations = validation.getPolicyValueValidations()
-            add(Pair("Policy value", renderPolicyValue("Integer", policyValueValidations)))
+) : DevicePolicy {
+    override fun generateDocRows(context: DevicePolicyContext): List<TableRow> = buildList {
+        addAll(base.generateDocRows())
+        val resolutionMechanismDoc = resolutionMechanism.generateDocs()
+        if (resolutionMechanismDoc.isNotEmpty()) {
+            add(TableRow("Conflict resolution mechanism", resolutionMechanismDoc))
         }
-
-        append(renderTable(tableEntries))
+        val policyValueValidations = validation.getPolicyValueValidations()
+        add(TableRow("Policy value", renderPolicyValue("Integer", policyValueValidations)))
     }
 }
 

@@ -18,6 +18,7 @@ package com.android.tools.metalava.doc.annotationhandlers
 
 import com.android.tools.metalava.doc.linkToField
 import com.android.tools.metalava.model.Item
+import com.android.tools.metalava.model.annotation.binding.BindingConstructor
 import com.android.tools.metalava.model.annotation.binding.bindTo
 import com.android.tools.metalava.reporter.Issues
 
@@ -35,9 +36,32 @@ class PolicyDefinitionProxy(
     private val requiredPermission: String?,
     private val requiredCrossUserPermission: String?,
     private val applyOnFullUsersOnly: Boolean = false,
-    private val allowedDpcTypes: AllowedDpcTypesProxy,
+    /** The DPC types permitted to set this policy. */
+    private val allowedDpcTypes: Set<AllowedDpcType>,
     private val allowedRoles: AllowedRolesProxy,
 ) {
+    /** Binds annotation attributes from [AllowedDpcTypesProxy] into a [Set] of [AllowedDpcType]. */
+    @BindingConstructor
+    constructor(
+        item: Item,
+        allowedScopes: List<Int>,
+        affectedResource: Int,
+        requiredPermission: String?,
+        requiredCrossUserPermission: String?,
+        applyOnFullUsersOnly: Boolean = false,
+        allowedDpcTypes: AllowedDpcTypesProxy,
+        allowedRoles: AllowedRolesProxy,
+    ) : this(
+        item = item,
+        allowedScopes = allowedScopes,
+        affectedResource = affectedResource,
+        requiredPermission = requiredPermission,
+        requiredCrossUserPermission = requiredCrossUserPermission,
+        applyOnFullUsersOnly = applyOnFullUsersOnly,
+        allowedDpcTypes = AllowedDpcType.entries.filter { it.isAllowed(allowedDpcTypes) }.toSet(),
+        allowedRoles = allowedRoles,
+    )
+
     private val codebase = item.codebase
     private val reporter = codebase.reporter
 
@@ -127,15 +151,14 @@ class PolicyDefinitionProxy(
         crossUserPermission: String,
         scope: Int
     ): List<AllowedDpcType> {
-        val allowedDpcs = AllowedDpcType.entries.filter { it.isAllowed(allowedDpcTypes) }
         return if (scope == PolicyScope.USER.id) {
-            allowedDpcs
+            allowedDpcTypes.toList()
         } else if (scope == PolicyScope.DEVICE.id || scope == PolicyScope.PARENT_USER.id) {
             val crossUserDpcs = getDpcTypesWithCrossUserPermission(crossUserPermission)
-            allowedDpcs.filter { it in crossUserDpcs }
+            allowedDpcTypes.filter { it in crossUserDpcs }
         } else if (scope == PolicyScope.LOGIN_SCREEN.id) {
             val crossUserDpcs = getDpcTypesWithCrossUserPermission(crossUserPermission)
-            allowedDpcs.filter { it in crossUserDpcs && it in allowedDpcTypesForLoginScreen }
+            allowedDpcTypes.filter { it in crossUserDpcs && it in allowedDpcTypesForLoginScreen }
         } else {
             reporter.report(Issues.INVALID_DEVICE_POLICY_ANNOTATION, item, "Invalid scope: $scope")
             emptyList()
@@ -149,11 +172,11 @@ class PolicyDefinitionProxy(
         } else ""
     }
 
-    /** Generates table entries for the base policy definition. */
-    fun getTableEntries(): List<Pair<String, String>> = buildList {
+    /** Generates documentation table rows for the base policy definition. */
+    fun generateDocRows(): List<TableRow> = buildList {
         if (applyOnFullUsersOnly) {
             add(
-                Pair(
+                TableRow(
                     "Supported users",
                     "Full users only (does not support profiles including work profiles)."
                 )
@@ -234,10 +257,10 @@ class PolicyDefinitionProxy(
                 )
             }
 
-            add(Pair("Settable by", docLines.joinToString("")))
+            add(TableRow("Settable by", docLines.joinToString("")))
         }
 
-        add(Pair("Resources affected", getResourceName(affectedResource)))
+        add(TableRow("Resources affected", getResourceName(affectedResource)))
     }
 
     private fun formatPermissions(first: String?, second: String?): String? {
