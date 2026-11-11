@@ -165,7 +165,6 @@ class SnapshotDeltaMakerTest : BaseTextCodebaseTest() {
                               }
                             }
                         """,
-                    // TODO(b/584673648): Unchanged<T> should not be emitted in the delta signature.
                     extendsSignature =
                         """
                             // Signature format: 2.0
@@ -173,8 +172,6 @@ class SnapshotDeltaMakerTest : BaseTextCodebaseTest() {
                               public class ExtendsSuper<T> extends test.pkg.BaseSuper<T> {
                               }
                               public class Foo<T> extends test.pkg.ExtendsSuper<T> {
-                              }
-                              public class Unchanged<T> extends test.pkg.BaseSuper<T> {
                               }
                             }
                         """,
@@ -207,7 +204,6 @@ class SnapshotDeltaMakerTest : BaseTextCodebaseTest() {
                               }
                             }
                         """,
-                    // TODO(b/584673648): Unchanged<T> should not be emitted in the delta signature.
                     extendsSignature =
                         """
                             // Signature format: 2.0
@@ -215,8 +211,6 @@ class SnapshotDeltaMakerTest : BaseTextCodebaseTest() {
                               public interface ExtendsInterface<T> extends test.pkg.BaseInterface<T> {
                               }
                               public class Foo<T> implements test.pkg.ExtendsInterface<T> {
-                              }
-                              public class Unchanged<T> implements test.pkg.BaseInterface<T> {
                               }
                             }
                         """,

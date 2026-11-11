@@ -502,18 +502,12 @@ class FilterSignatureCommandTest :
                     )
 
             verify {
-                // TODO(b/584673648): Unchanged generic classes GenericImpl and GenericSub from
-                //  public.txt should not be emitted in filtered-system.txt.
                 output.assertSignatureContents(
                     """
                         // Signature format: 2.0
                         package test.pkg {
                           public class Foo {
                             method public void systemMethod();
-                          }
-                          public class GenericImpl<T> implements test.pkg.GenericInterface<T> {
-                          }
-                          public final class GenericSub<T extends test.pkg.Foo> extends test.pkg.GenericSuper<T> {
                           }
                         }
                     """
