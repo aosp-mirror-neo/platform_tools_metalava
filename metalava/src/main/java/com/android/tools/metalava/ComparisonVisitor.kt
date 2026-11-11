@@ -296,6 +296,7 @@ object CodebaseComparator {
                             }
                         }
                         else -> {
+                            var compareChildren = true
                             if (newMatches) {
                                 if (oldMatches) {
                                     dispatchToCompare(visitor, old, new)
@@ -320,20 +321,23 @@ object CodebaseComparator {
                                             newParent,
                                             referenceFilter,
                                         )
+                                        compareChildren = false
                                     }
                                 }
                             }
 
-                            // Compare the children (recurse)
-                            compare(
-                                visitor,
-                                oldTree.children,
-                                newTree.children,
-                                newTree.item(),
-                                oldTree.item(),
-                                surfaceFilter,
-                                referenceFilter,
-                            )
+                            if (compareChildren) {
+                                // Compare the children (recurse)
+                                compare(
+                                    visitor,
+                                    oldTree.children,
+                                    newTree.children,
+                                    newTree.item(),
+                                    oldTree.item(),
+                                    surfaceFilter,
+                                    referenceFilter,
+                                )
+                            }
 
                             index1++
                             index2++

@@ -572,14 +572,8 @@ class ComparisonVisitorTest : BaseTemporaryFolderOwner(), Assertions {
             referenceFilter = filter,
         )
 
-        // TODO(b/571827848): Should not recurse into children of removed class test.pkg.Foo and
-        //  report its methods as removed too.
         assertEquals(
-            """
-                class test.pkg.Foo was removed
-                method test.pkg.Foo.foo() was removed
-            """
-                .trimIndent(),
+            "class test.pkg.Foo was removed",
             differences.sorted().joinToString("\n"),
         )
     }
