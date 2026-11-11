@@ -23,6 +23,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.Test
@@ -287,6 +288,45 @@ class ClassMergerTest : BaseTextCodebaseTest() {
         ) {
             val fooClass = codebase.assertTypeAlias("test.pkg.Foo")
             assertEquals("java.lang.String", fooClass.optionalAliasedType?.toTypeString())
+        }
+    }
+
+    /**
+     * Verifies that when a generic class from an earlier signature file transitions to a typealias
+     * in a later file, the parsed `optionalAliasedType` reuses the existing class's
+     * `TypeParameterItem`s rather than referencing newly created ones.
+     */
+    @Test
+    fun `Test parse multiple files transitions generic class to typealias`() {
+        runSignatureTest(
+            signature(
+                "first.txt",
+                """
+                    // Signature format: 2.0
+                    package test.pkg {
+                        public class GenericFoo<T> {
+                        }
+                    }
+                """,
+            ),
+            signature(
+                "second.txt",
+                """
+                    // Signature format: 2.0
+                    package test.pkg {
+                        public typealias GenericFoo<T> = java.util.List<T>;
+                    }
+                """,
+            ),
+        ) {
+            val genericFooClass = codebase.assertTypeAlias("test.pkg.GenericFoo")
+            genericFooClass.optionalAliasedType.assertClassTypeItem {
+                arguments.single().assertVariableTypeItem {
+                    // TODO(b/584673648): The aliased type should reuse the existing class's
+                    //  TypeParameterItem instead of creating a new one.
+                    assertNotSame(genericFooClass.typeParameterList.single(), asTypeParameter)
+                }
+            }
         }
     }
 
