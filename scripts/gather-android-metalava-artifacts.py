@@ -176,6 +176,21 @@ def default_signature_files():
     ])
 
 
+def default_compatibility_files():
+    """:return: A representative sample list of compatibility baseline files created by the Android build using Metalava."""
+    return create_targets([
+        Target(
+            f"out/soong/.intermediates/frameworks/base/api/{target}/android_common/gen/updated-baseline.txt",
+            f"{target}-updated-baseline.txt",
+        )
+        for target in [
+            "frameworks-base-api-current-compat",
+            "frameworks-base-api-system-current-compat",
+            "frameworks-base-api-module-lib-current-compat",
+        ]
+    ])
+
+
 def default_jdiff_files():
     """:return: A representative sample list of JDiff files created by the Android build using Metalava."""
     return create_targets([
@@ -247,6 +262,7 @@ def construct_target_list(args, top):
         targets += default_sdk_values_metadata_zip_files()
         targets += default_annotation_zip_files()
         targets += default_signature_files()
+        targets += default_compatibility_files()
         targets += default_jdiff_files()
         targets += default_api_version_files()
         targets += default_dex_writer_files()
