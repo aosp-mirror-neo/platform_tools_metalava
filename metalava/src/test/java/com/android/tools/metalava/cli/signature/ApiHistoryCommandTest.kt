@@ -973,6 +973,114 @@ class ApiHistoryCommandTest : BaseCommandTest<ApiHistoryCommand>({ ApiHistoryCom
         }
     }
 
+    // TODO(b/584719581): Report an issue and remove inconsistent elements instead of crashing.
+    @Test(expected = UninitializedPropertyAccessException::class)
+    fun `Test SDK extensions with inconsistent API history`() {
+        val sdkInfoXml =
+            xml(
+                    "sdk-extensions-info.xml",
+                    """
+                        <?xml version="1.0" encoding="utf-8"?>
+                        <sdk-extensions-info>
+                          <sdk
+                            id="30"
+                            shortname="R-ext"
+                            name="R Extensions"
+                            reference="android/os/Build${'$'}VERSION_CODES${'$'}R" />
+                          <symbol
+                            jar="framework-ext"
+                            pattern="*"
+                            sdks="R-ext" />
+                        </sdk-extensions-info>
+                    """,
+                )
+                .createFile(temporaryFolder.root)
+
+        val sdk30 =
+            signature(
+                    "sdk/30/public/api/android.txt",
+                    """
+                        // Signature format: 2.0
+                        package java.lang {
+                          public class Object {
+                            ctor public Object();
+                          }
+                        }
+                        package test.pkg {
+                          public class ExtClass {
+                            ctor public ExtClass();
+                            method public void methodIn30();
+                          }
+                          public interface OldInterface {
+                          }
+                          public class OldSuperClass {
+                            ctor public OldSuperClass();
+                          }
+                        }
+                    """,
+                )
+                .createFile(temporaryFolder.root)
+
+        // Extension 1 contains ClassOnlyInExt1 and members/supertypes on ExtClass that are
+        // missing from both Extension 2 (the latest extension) and SDK 30.
+        val ext1 =
+            signature(
+                    "sdk/extensions/1/public/api/framework-ext.txt",
+                    """
+                        // Signature format: 2.0
+                        package test.pkg {
+                          public class ClassOnlyInExt1 {
+                            ctor public ClassOnlyInExt1();
+                            method public void someMethod();
+                          }
+                          public class ExtClass extends test.pkg.OldSuperClass implements test.pkg.OldInterface {
+                            ctor public ExtClass();
+                            method public void methodIn30();
+                            method public void methodOnlyInExt1();
+                            field public int fieldOnlyInExt1;
+                          }
+                        }
+                    """,
+                )
+                .createFile(temporaryFolder.root)
+
+        val ext2 =
+            signature(
+                    "sdk/extensions/2/public/api/framework-ext.txt",
+                    """
+                        // Signature format: 2.0
+                        package test.pkg {
+                          public class ExtClass {
+                            ctor public ExtClass();
+                            method public void methodIn30();
+                            method public void methodInExt2();
+                          }
+                        }
+                    """,
+                )
+                .createFile(temporaryFolder.root)
+
+        commandTest {
+            val outputXml = outputFile("api-versions.xml")
+            args +=
+                listOf(
+                    "api-history",
+                    "--output-file",
+                    outputXml.path,
+                    ARG_SDK_INFO_FILE,
+                    sdkInfoXml.path,
+                    ARG_API_VERSION_FOR_SDK_EXTENSION,
+                    "10000",
+                    "--pattern",
+                    "${temporaryFolder.root}/sdk/{version:level}/public/api/android.txt",
+                    "--pattern",
+                    "${temporaryFolder.root}/sdk/extensions/{version:extension}/public/api/{module}.txt",
+                    "--historical-files",
+                    listOf(sdk30, ext1, ext2).joinToString(File.pathSeparator) { it.path },
+                )
+        }
+    }
+
     /** Create a simple `sdk-extension-info.xml` for testing. */
     private fun createSdkExtensionsInfoXml() =
         temporaryFolder.newFile("sdk-extensions-info.xml").apply {
