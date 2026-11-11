@@ -2016,6 +2016,8 @@ private constructor(
         ) {
             val surfaceFilter = getSurfaceFilter(checkType.apiType, apiSurface)
             val referenceFilter = getReferenceFilter(checkType.apiType, apiSurface)
+            val comparatorReferenceFilter =
+                getComparatorReferenceFilter(checkType.apiType, apiSurface)
             val checker =
                 CompatibilityCheck(
                     surfaceFilter = surfaceFilter,
@@ -2049,7 +2051,7 @@ private constructor(
                 oldFullCodebase,
                 newFullCodebase,
                 surfaceFilter,
-                referenceFilter,
+                comparatorReferenceFilter,
             )
 
             val message =
@@ -2073,6 +2075,7 @@ private constructor(
         ) {
             val surfaceFilter = getSurfaceFilter(apiType, apiSurface)
             val referenceFilter = getReferenceFilter(apiType, apiSurface)
+            val comparatorReferenceFilter = getComparatorReferenceFilter(apiType, apiSurface)
             val checker =
                 CompatibilityCheck(
                     surfaceFilter = surfaceFilter,
@@ -2088,7 +2091,7 @@ private constructor(
                 oldCodebase,
                 newCodebase,
                 surfaceFilter,
-                referenceFilter,
+                comparatorReferenceFilter,
             )
 
             if (checker.foundProblems) {
@@ -2115,5 +2118,13 @@ private constructor(
                 apiType,
                 apiSurface,
             )
+
+        /**
+         * Returns a reference filter for [CodebaseComparator] based on the [apiType] and
+         * [apiSurface]. This is used to construct the comparison trees and determine whether an
+         * item absent from [getSurfaceFilter] was moved rather than removed.
+         */
+        private fun getComparatorReferenceFilter(apiType: ApiType, apiSurface: ApiSurface) =
+            getReferenceFilter(apiType, apiSurface)
     }
 }
