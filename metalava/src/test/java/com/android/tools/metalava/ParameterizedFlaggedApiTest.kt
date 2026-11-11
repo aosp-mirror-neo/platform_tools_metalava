@@ -1953,6 +1953,10 @@ class ParameterizedFlaggedApiTest(private val config: Configuration) : DriverTes
                     }
                 """
             ),
+            // TODO(b/571827848): Remove once moving items to the removed API via @RemovedFromApi
+            //  no longer reports RemovedClass or RemovedMethod errors, which would otherwise abort
+            //  stub generation.
+            extraArguments = warningIssues(Issues.REMOVED_CLASS, Issues.REMOVED_METHOD),
             previouslyReleasedApi =
                 mapOf(
                     Surface.PUBLIC to
@@ -1961,6 +1965,20 @@ class ParameterizedFlaggedApiTest(private val config: Configuration) : DriverTes
                             package test.pkg {
                               public class Foo {
                                 ctor public Foo();
+                                method public void removedPublicApi();
+                              }
+                              public class RemovedBar {
+                                ctor public RemovedBar();
+                                method public void method();
+                              }
+                            }
+                        """,
+                    Surface.SYSTEM to
+                        """
+                            // Signature format: 2.0
+                            package test.pkg {
+                              public class Foo {
+                                method public void removedSystemApi();
                               }
                             }
                         """,
@@ -2020,6 +2038,13 @@ class ParameterizedFlaggedApiTest(private val config: Configuration) : DriverTes
                     Expectations(
                         Surface.PUBLIC,
                         Flagged.FINALIZE_FOO_BAR_APIS,
+                        // TODO(b/571827848): Moving items to the removed API via @RemovedFromApi
+                        //  should not report RemovedClass or RemovedMethod.
+                        expectedIssues =
+                            """
+                                released-api.txt:5: warning: Binary breaking change: Removed method test.pkg.Foo.removedPublicApi() [RemovedMethod]
+                                released-api.txt:7: warning: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+                            """,
                         expectedApiSignature =
                             """
                                 // Signature format: 2.0
@@ -2158,6 +2183,12 @@ class ParameterizedFlaggedApiTest(private val config: Configuration) : DriverTes
                     Expectations(
                         Surface.SYSTEM,
                         Flagged.FINALIZE_FOO_BAR_APIS,
+                        // TODO(b/571827848): Moving items to the removed API via @RemovedFromApi
+                        //  should not report RemovedMethod.
+                        expectedIssues =
+                            """
+                                released-api-1.txt:4: warning: Binary breaking change: Removed method test.pkg.Foo.removedSystemApi() [RemovedMethod]
+                            """,
                         expectedApiSignature =
                             """
                                 // Signature format: 2.0
