@@ -126,10 +126,7 @@ private abstract class BaseFlaggedApiLint(
     apiFilters: ApiFilters,
 ) : DelegatedVisitor {
     /** Predicate that checks if the item appears in the signature file. */
-    protected val filterEmit = apiFilters.emit
-
-    /** The filter to use to determine if we should emit a reference to an item. */
-    protected val filterReference = apiFilters.reference
+    private val filterEmit = apiFilters.emit
 
     /** Filter out issues that are not for items being emitted. */
     private val filteredReporter = FilteringReporter(reporter, oldCodebase, filterEmit)
@@ -148,19 +145,29 @@ private abstract class BaseFlaggedApiLint(
     }
 
     override fun visitClass(cls: ClassItem) {
-        checkSelectableItem(cls)
+        visitSelectableItem(cls)
     }
 
     override fun visitMethod(method: MethodItem) {
-        checkSelectableItem(method)
+        visitSelectableItem(method)
     }
 
     override fun visitConstructor(constructor: ConstructorItem) {
-        checkSelectableItem(constructor)
+        visitSelectableItem(constructor)
     }
 
     override fun visitField(field: FieldItem) {
-        checkSelectableItem(field)
+        visitSelectableItem(field)
+    }
+
+    /**
+     * Skip any [item] that is not itself emitted in the signature file (such as enclosing container
+     * classes visited only so their emitted members or nested classes can be reached) before
+     * delegating to [checkSelectableItem].
+     */
+    private fun visitSelectableItem(item: SelectableItem) {
+        if (!filterEmit.test(item)) return
+        checkSelectableItem(item)
     }
 
     /**
@@ -261,6 +268,9 @@ private class CoreFlaggedApiLint(
     reporter: Reporter,
     apiFilters: ApiFilters,
 ) : BaseFlaggedApiLint(oldCodebase, reporter, apiFilters) {
+    /** The filter to use to determine if we should emit a reference to an item. */
+    private val filterReference = apiFilters.reference
+
     override fun checkHasFlaggedApi(item: SelectableItem) {
         // Cannot flag an implicit constructor.
         if (item is ConstructorItem && item.isImplicitConstructor()) return
@@ -290,28 +300,24 @@ private class CoreFlaggedApiLint(
      * previously been released.
      */
     private fun checkFlaggedApiOnNewApi(item: SelectableItem) {
-        val elidedField =
-            if (item is FieldItem) {
-                val inheritedFrom = item.inheritedFrom
-                // The field gets elided if we're able to reference the original class, but not emit
-                // it; this happens e.g. when inheriting from a public API interface into an
-                // @SystemApi class.
-                // The only edge-case we don't handle well here is if the inheritance itself is new,
-                // because that can't be flagged.
-                // TODO(b/299659989): adjust comment once flagging inheritance is possible.
-                inheritedFrom != null && filterReference.test(inheritedFrom)
-            } else {
-                false
-            }
-        if (!filterEmit.test(item) || elidedField) {
-            // This API wouldn't appear in the signature file, so we don't know here if the API is
-            // pre-existing.
-            // Since the base API is either new and subject to flagging rules, or preexisting and
-            // therefore stable, the elided API is not required to be flagged.
+        if (item is FieldItem) {
+            val inheritedFrom = item.inheritedFrom
+            // The field gets elided if we're able to reference the original class, but not emit
+            // it; this happens e.g. when inheriting from a public API interface into an
+            // @SystemApi class.
             // The only edge-case we don't handle well here is if the inheritance itself is new,
             // because that can't be flagged.
             // TODO(b/299659989): adjust comment once flagging inheritance is possible.
-            return
+            if (inheritedFrom != null && filterReference.test(inheritedFrom)) {
+                // This API wouldn't appear in the signature file, so we don't know here if the API
+                // is pre-existing.
+                // Since the base API is either new and subject to flagging rules, or preexisting
+                // and therefore stable, the elided API is not required to be flagged.
+                // The only edge-case we don't handle well here is if the inheritance itself is new,
+                // because that can't be flagged.
+                // TODO(b/299659989): adjust comment once flagging inheritance is possible.
+                return
+            }
         }
         report(UNFLAGGED_API, item, "New API must be flagged with @FlaggedApi: ${item.describe()}")
     }
@@ -425,12 +431,6 @@ private class RemovedFlaggedApiLint(
     private val removedVariant: ApiVariant,
 ) : BaseFlaggedApiLint(oldCodebase, reporter, apiFilters) {
     override fun checkSelectableItem(item: SelectableItem) {
-        // The removed CodebaseFragment visits enclosing CORE classes as containers so their
-        // removed members or nested classes can be reached. Skip any item that is not itself
-        // emitted in the removed signature file (including non-removed container classes,
-        // non-emittable items, and elided method overrides).
-        if (!filterEmit.test(item)) return
-
         // ApiSurfacePredicate.forDelta (used by filterEmit) also matches classes via
         // superClassApiVariants when a superclass belongs to the delta. Require `removedVariant`
         // directly in `itemApiVariants` so only items actually removed in this specific API surface
