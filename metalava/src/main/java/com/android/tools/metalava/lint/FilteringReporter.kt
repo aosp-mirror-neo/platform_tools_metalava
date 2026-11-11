@@ -104,12 +104,10 @@ class FilteringReporter(
      */
     private fun computeMaximumSeverity(item: Item, previousItem: Item?, issue: Issues.Issue) =
         when {
-            // FlaggedApi and SdkExtensionApi issues are always reported even if they do appear in
-            // the previously released API because they are being reported because there is a change
-            // compared with the previously released API.
-            issue == Issues.UNFLAGGED_API ||
-                issue == Issues.UNEXPORTED_FLAGGED_API ||
-                issue == Issues.INVALID_SDK_EXTENSION_API -> {
+            // SdkExtensionApi issues are always reported even if they do appear in the previously
+            // released API because they are being reported because there is a change compared with
+            // the previously released API.
+            issue == Issues.INVALID_SDK_EXTENSION_API -> {
                 Severity.ERROR
             }
 

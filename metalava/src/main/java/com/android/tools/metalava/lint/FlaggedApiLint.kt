@@ -48,7 +48,6 @@ import com.android.tools.metalava.reporter.Issues.Issue
 import com.android.tools.metalava.reporter.Issues.UNEXPORTED_FLAGGED_API
 import com.android.tools.metalava.reporter.Issues.UNFLAGGED_API
 import com.android.tools.metalava.reporter.Reporter
-import com.android.tools.metalava.reporter.Severity
 import java.io.StringWriter
 
 /**
@@ -115,33 +114,25 @@ object FlaggedApiLint {
 /**
  * Base [DelegatedVisitor] shared by `@FlaggedApi` checks on core and removed API fragments.
  *
- * Provides common issue reporting via [FilteringReporter] as well as validation of `@FlaggedApi`
- * annotations that remain present in the codebase ([checkFlaggedApiLiteral] and
- * [checkFlaggedApiIsExported]), while delegating `@FlaggedApi` presence requirements
- * ([checkHasFlaggedApi]) to subclasses.
+ * Provides common issue reporting via [Reporter] as well as validation of `@FlaggedApi` annotations
+ * that remain present in the codebase ([checkFlaggedApiLiteral] and [checkFlaggedApiIsExported]),
+ * while delegating `@FlaggedApi` presence requirements ([checkHasFlaggedApi]) to subclasses.
  */
 private abstract class BaseFlaggedApiLint(
-    protected val oldCodebase: Codebase?,
-    reporter: Reporter,
+    private val reporter: Reporter,
     apiFilters: ApiFilters,
 ) : DelegatedVisitor {
     /** Predicate that checks if the item appears in the signature file. */
     private val filterEmit = apiFilters.emit
 
-    /** Filter out issues that are not for items being emitted. */
-    private val filteredReporter = FilteringReporter(reporter, oldCodebase, filterEmit)
-
-    /** Report [id] on [item] through [filteredReporter] with [item] as the reporting context. */
+    /** Report [id] on [item] through [reporter]. */
     protected fun report(
         id: Issue,
         item: Item,
         message: String,
         location: FileLocation = FileLocation.UNKNOWN,
-        maximumSeverity: Severity = Severity.UNLIMITED,
     ) {
-        filteredReporter.withContext(item) {
-            filteredReporter.report(id, item, message, location, maximumSeverity)
-        }
+        reporter.report(id, item, message, location)
     }
 
     override fun visitClass(cls: ClassItem) {
@@ -264,10 +255,10 @@ private abstract class BaseFlaggedApiLint(
  * or modifier changes on previously released APIs.
  */
 private class CoreFlaggedApiLint(
-    oldCodebase: Codebase?,
+    private val oldCodebase: Codebase?,
     reporter: Reporter,
     apiFilters: ApiFilters,
-) : BaseFlaggedApiLint(oldCodebase, reporter, apiFilters) {
+) : BaseFlaggedApiLint(reporter, apiFilters) {
     /** The filter to use to determine if we should emit a reference to an item. */
     private val filterReference = apiFilters.reference
 
@@ -425,11 +416,11 @@ private class CoreFlaggedApiLint(
  * validates `@FlaggedApi` literal and exported-flag rules on finalized removals (case 2).
  */
 private class RemovedFlaggedApiLint(
-    oldCodebase: Codebase,
+    private val oldCodebase: Codebase,
     reporter: Reporter,
     apiFilters: ApiFilters,
     private val removedVariant: ApiVariant,
-) : BaseFlaggedApiLint(oldCodebase, reporter, apiFilters) {
+) : BaseFlaggedApiLint(reporter, apiFilters) {
     override fun checkSelectableItem(item: SelectableItem) {
         // ApiSurfacePredicate.forDelta (used by filterEmit) also matches classes via
         // superClassApiVariants when a superclass belongs to the delta. Require `removedVariant`
@@ -451,10 +442,6 @@ private class RemovedFlaggedApiLint(
         //   even when it was elided from the previous signature file.
         Codebase.findPreviouslyReleased(oldCodebase, item) ?: return
 
-        // Run `checkHasFlaggedApi`, `checkFlaggedApiLiteral`, and `checkFlaggedApiIsExported`.
-        // Note that `FilteringReporter` explicitly exempts `UNFLAGGED_API`, `FLAGGED_API_LITERAL`,
-        // and `UNEXPORTED_FLAGGED_API` from suppression on items present in `oldCodebase`, so all
-        // three checks are reported normally on newly removed APIs.
         super.checkSelectableItem(item)
     }
 
