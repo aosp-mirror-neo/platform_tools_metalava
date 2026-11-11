@@ -768,7 +768,7 @@ class Driver(
             }
         }
 
-        val apiGenerator = ApiGenerator(tracer)
+        val apiGenerator = ApiGenerator(tracer, reporter)
         apiLevelsGenerationOptions
             .fromSignatureFilesConfig(
                 // Do not use a cache here as each file loaded is only loaded once and the created

@@ -369,6 +369,6 @@ class ApiHistoryCommand :
                 useInternalNames = useInternalNames,
             )
 
-        ApiGenerator(tracer).generateApiHistory(config)
+        ApiGenerator(tracer, reporter).generateApiHistory(config)
     }
 }

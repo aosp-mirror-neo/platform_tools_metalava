@@ -16,12 +16,21 @@
 package com.android.tools.metalava.apilevels
 
 import androidx.tracing.Tracer
+import com.android.tools.metalava.reporter.Reporter
 import com.android.tools.metalava.trace
 import java.io.File
 import java.io.IOException
 
-/** Generates API version history. */
-class ApiGenerator(private val tracer: Tracer) {
+/**
+ * Generates API version history.
+ *
+ * @param tracer the [Tracer] to use for tracing execution.
+ * @param reporter the [Reporter] to use for reporting issues found in the API history.
+ */
+class ApiGenerator(
+    private val tracer: Tracer,
+    private val reporter: Reporter,
+) {
     /**
      * Generates an API version history file based on the API surfaces of the versions provided.
      *
