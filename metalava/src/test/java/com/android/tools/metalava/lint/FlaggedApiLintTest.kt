@@ -689,6 +689,59 @@ class FlaggedApiLintTest : DriverTest() {
         )
     }
 
+    /**
+     * Verify that newly added `@Deprecated` APIs and modifier changes to previously `@Deprecated`
+     * APIs still require `@FlaggedApi`, while unchanged `@Deprecated` APIs do not.
+     */
+    @Test
+    fun `Require @FlaggedApi on deprecated APIs that are added or modified`() {
+        checkFlaggedApiLint(
+            // TODO(b/571827848): FilteringReporter suppresses UnflaggedApi on newly added or
+            //  previously deprecated items.
+            expectedIssues = "",
+            apiLint =
+                """
+                    // Signature format: 2.0
+                    package test.pkg {
+                      @Deprecated public abstract class Foo {
+                        ctor @Deprecated public Foo();
+                        method @Deprecated public final void modifiedMethod();
+                      }
+                    }
+                """,
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package test.pkg;
+
+                            // Previously deprecated class with `abstract` removed without @FlaggedApi.
+                            /** @deprecated */
+                            @Deprecated
+                            public class Foo {
+                                // Unchanged previously deprecated constructor: no UnflaggedApi expected.
+                                /** @deprecated */
+                                @Deprecated
+                                public Foo() {}
+
+                                // Previously deprecated method with `final` removed without @FlaggedApi.
+                                /** @deprecated */
+                                @Deprecated
+                                public void modifiedMethod() {}
+
+                                // Newly added deprecated method without @FlaggedApi.
+                                /** @deprecated */
+                                @Deprecated
+                                public void newDeprecatedMethod() {}
+                            }
+                        """
+                    ),
+                    flagsFile,
+                ),
+            extraArguments = errorIssues(Issues.UNFLAGGED_API),
+        )
+    }
+
     @Test
     fun `Require @FlaggedApi on RequiresPermission changes`() {
         checkFlaggedApiLint(
@@ -1113,16 +1166,74 @@ class FlaggedApiLintTest : DriverTest() {
                             import android.annotation.FlaggedApi;
 
                             // Use of unexported flag will result in UnexportedFlaggedApi error
-                            @FlaggedApi("test.pkg.unexported_flag")
+                            @FlaggedApi(Flags.FLAG_UNEXPORTED_FLAG)
                             public class Foo {
                                 // Use of exported flag will not result in errors
-                                @FlaggedApi("test.pkg.exported_flag")
+                                @FlaggedApi(Flags.FLAG_EXPORTED_FLAG)
                                 public Foo() {}
+                            }
+                        """
+                    ),
+                    // Reference generated flag constants rather than string literals so this test
+                    // isolates UnexportedFlaggedApi from FlaggedApiLiteral.
+                    java(
+                        """
+                            package test.pkg;
+
+                            class Flags {
+                                static final String FLAG_UNEXPORTED_FLAG = "test.pkg.unexported_flag";
+                                static final String FLAG_EXPORTED_FLAG = "test.pkg.exported_flag";
                             }
                         """
                     ),
                 ),
             checkCompatibilityApiReleased = previouslyReleasedApi,
+        )
+    }
+
+    /**
+     * Verify that `FlaggedApiLiteral` is reported even when `@FlaggedApi("...")` with a string
+     * literal is used on a previously released API (for example, when deprecating an existing API).
+     */
+    @Test
+    fun `Report FlaggedApiLiteral on previously released APIs`() {
+        checkFlaggedApiLint(
+            // TODO(b/571827848): FilteringReporter suppresses FlaggedApiLiteral on items present
+            //  in the previously released API.
+            expectedIssues = "",
+            apiLint =
+                """
+                    // Signature format: 2.0
+                    package android.foobar {
+                      public class Existing {
+                        ctor public Existing();
+                        method public void deprecatedWithLiteral();
+                      }
+                    }
+                """,
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package android.foobar;
+
+                            import android.annotation.FlaggedApi;
+
+                            // Previously released class annotated with a string literal.
+                            @FlaggedApi("android.foobar.my_feature")
+                            public class Existing {
+                                public Existing() {}
+
+                                // Previously released method deprecated using a string literal.
+                                /** @deprecated */
+                                @Deprecated
+                                @FlaggedApi("android.foobar.my_feature")
+                                public void deprecatedWithLiteral() {}
+                            }
+                        """
+                    ),
+                    flagsFile,
+                ),
         )
     }
 
