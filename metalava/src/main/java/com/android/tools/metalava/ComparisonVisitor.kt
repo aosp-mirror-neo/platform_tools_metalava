@@ -243,8 +243,8 @@ object CodebaseComparator {
      *
      * @param surfaceFilter determines if an item is considered for addition or removal callbacks.
      * @param referenceFilter determines if an item is considered present in the reference API
-     *   hierarchy (to distinguish items moved into base surfaces or inherited from base surfaces
-     *   from removals).
+     *   hierarchy (to distinguish items moved into base surfaces or the removed API, or inherited
+     *   from base surfaces, from removals).
      */
     private fun compare(
         visitor: ComparisonVisitor,
@@ -310,7 +310,7 @@ object CodebaseComparator {
                             } else {
                                 if (oldMatches) {
                                     // If new is in the reference API, it was moved to a base
-                                    // surface rather than removed from the API.
+                                    // surface or the removed API rather than removed from the API.
                                     val newInApi = referenceFilter.testOrTrue(new)
                                     if (newInApi) {
                                         dispatchToCompare(visitor, old, new)

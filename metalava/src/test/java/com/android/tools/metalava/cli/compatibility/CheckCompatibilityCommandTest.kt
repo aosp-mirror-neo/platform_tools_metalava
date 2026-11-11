@@ -372,18 +372,6 @@ class CheckCompatibilityCommandTest :
                         }
                     """,
                 )
-
-            // TODO(b/571827848): Items moved to removed.txt should not be reported as removed.
-            expectedStderr =
-                """
-                    TESTROOT/released.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.removedMethod() [RemovedMethod]
-                    TESTROOT/released.txt:8: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
-
-                    Aborting: Found compatibility problems checking the public API (TESTROOT/current.txt) against the API in TESTROOT/released.txt
-                """
-                    .trimIndent()
-
-            verify { assertEquals(-1, exitCode) }
         }
     }
 
@@ -440,13 +428,10 @@ class CheckCompatibilityCommandTest :
                     """,
                 )
 
-            // TODO(b/571827848): Should report AddedFinal on changedMethod() and RemovedMethod on
-            //  deletedFromRemovedBar() instead of reporting changedMethod() and RemovedBar as
-            //  removed.
             expectedStderr =
                 """
-                    TESTROOT/released.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.changedMethod() [RemovedMethod]
-                    TESTROOT/released.txt:7: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+                    TESTROOT/released.txt:10: error: Binary breaking change: Removed method test.pkg.RemovedBar.deletedFromRemovedBar() [RemovedMethod]
+                    TESTROOT/removed.txt:4: error: Binary breaking change: Method test.pkg.Foo.changedMethod has added 'final' qualifier [AddedFinal]
 
                     Aborting: Found compatibility problems checking the public API (TESTROOT/current.txt) against the API in TESTROOT/released.txt
                 """

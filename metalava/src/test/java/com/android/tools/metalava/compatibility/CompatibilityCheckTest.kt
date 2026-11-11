@@ -4767,13 +4767,6 @@ class CompatibilityCheckTest : DriverTest() {
                         """
                     ),
                 ),
-            // TODO(b/571827848): Items moved to the removed API via @RemovedFromApi should not be
-            //  reported as removed.
-            expectedIssues =
-                """
-                    released-api.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.removedMethod() [RemovedMethod]
-                    released-api.txt:8: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
-                """,
         )
     }
 
@@ -4823,13 +4816,10 @@ class CompatibilityCheckTest : DriverTest() {
                         """
                     ),
                 ),
-            // TODO(b/571827848): Should report AddedFinal on changedMethod() and RemovedMethod on
-            //  deletedFromRemovedBar() instead of reporting changedMethod() and RemovedBar as
-            //  removed.
             expectedIssues =
                 """
-                    released-api.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.changedMethod() [RemovedMethod]
-                    released-api.txt:7: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+                    released-api.txt:10: error: Binary breaking change: Removed method test.pkg.RemovedBar.deletedFromRemovedBar() [RemovedMethod]
+                    src/test/pkg/Foo.java:7: error: Binary breaking change: Method test.pkg.Foo.changedMethod has added 'final' qualifier [AddedFinal]
                 """,
         )
     }

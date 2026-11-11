@@ -2016,8 +2016,7 @@ private constructor(
         ) {
             val surfaceFilter = getSurfaceFilter(checkType.apiType, apiSurface)
             val referenceFilter = getReferenceFilter(checkType.apiType, apiSurface)
-            val comparatorReferenceFilter =
-                getComparatorReferenceFilter(checkType.apiType, apiSurface)
+            val comparatorReferenceFilter = getComparatorReferenceFilter(apiSurface)
             val checker =
                 CompatibilityCheck(
                     surfaceFilter = surfaceFilter,
@@ -2075,7 +2074,7 @@ private constructor(
         ) {
             val surfaceFilter = getSurfaceFilter(apiType, apiSurface)
             val referenceFilter = getReferenceFilter(apiType, apiSurface)
-            val comparatorReferenceFilter = getComparatorReferenceFilter(apiType, apiSurface)
+            val comparatorReferenceFilter = getComparatorReferenceFilter(apiSurface)
             val checker =
                 CompatibilityCheck(
                     surfaceFilter = surfaceFilter,
@@ -2120,11 +2119,12 @@ private constructor(
             )
 
         /**
-         * Returns a reference filter for [CodebaseComparator] based on the [apiType] and
-         * [apiSurface]. This is used to construct the comparison trees and determine whether an
-         * item absent from [getSurfaceFilter] was moved rather than removed.
+         * Returns a reference filter for [CodebaseComparator] based on the [apiSurface]. This
+         * includes both core and removed API variants across the surface hierarchy so that items
+         * moved into a base surface or into the removed API are compared rather than reported as
+         * removed.
          */
-        private fun getComparatorReferenceFilter(apiType: ApiType, apiSurface: ApiSurface) =
-            getReferenceFilter(apiType, apiSurface)
+        private fun getComparatorReferenceFilter(apiSurface: ApiSurface) =
+            ApiSurfacePredicate.wholeCoreAndRemovedApi(apiSurface)
     }
 }
