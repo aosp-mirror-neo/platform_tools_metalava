@@ -17,6 +17,7 @@
 package com.android.tools.metalava.cli.compatibility
 
 import com.android.tools.metalava.ARG_BASELINE
+import com.android.tools.metalava.ARG_REMOVED_API
 import com.android.tools.metalava.ARG_UPDATE_BASELINE
 import com.android.tools.metalava.cli.common.BaseCommandTest
 import com.android.tools.metalava.testing.signature
@@ -315,6 +316,143 @@ class CheckCompatibilityCommandTest :
                     updatedBaseline.readText().trim(),
                 )
             }
+        }
+    }
+
+    @Test
+    fun `Test items moved to removed-api`() {
+        commandTest {
+            args += "check-compatibility"
+            args +=
+                ARG_API_RELEASED to
+                    signature(
+                        "released.txt",
+                        """
+                            // Signature format: 2.0
+                            package test.pkg {
+                              public class Foo {
+                                ctor public Foo();
+                                method public void removedMethod();
+                                field public static final int REMOVED_FIELD = 1;
+                              }
+                              public class RemovedBar {
+                                ctor public RemovedBar();
+                                method public void bar();
+                              }
+                            }
+                        """,
+                    )
+            args +=
+                ARG_REMOVED_API to
+                    signature(
+                        "removed.txt",
+                        """
+                            // Signature format: 2.0
+                            package test.pkg {
+                              public class Foo {
+                                method public void removedMethod();
+                                field public static final int REMOVED_FIELD = 1;
+                              }
+                              public class RemovedBar {
+                                ctor public RemovedBar();
+                                method public void bar();
+                              }
+                            }
+                        """,
+                    )
+            args +=
+                signature(
+                    "current.txt",
+                    """
+                        // Signature format: 2.0
+                        package test.pkg {
+                          public class Foo {
+                            ctor public Foo();
+                          }
+                        }
+                    """,
+                )
+
+            // TODO(b/571827848): Items moved to removed.txt should not be reported as removed.
+            expectedStderr =
+                """
+                    TESTROOT/released.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.removedMethod() [RemovedMethod]
+                    TESTROOT/released.txt:8: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+
+                    Aborting: Found compatibility problems checking the public API (TESTROOT/current.txt) against the API in TESTROOT/released.txt
+                """
+                    .trimIndent()
+
+            verify { assertEquals(-1, exitCode) }
+        }
+    }
+
+    @Test
+    fun `Test incompatible changes in items moved to removed-api`() {
+        commandTest {
+            args += "check-compatibility"
+            args +=
+                ARG_API_RELEASED to
+                    signature(
+                        "released.txt",
+                        """
+                            // Signature format: 2.0
+                            package test.pkg {
+                              public class Foo {
+                                ctor public Foo();
+                                method public void changedMethod();
+                              }
+                              public class RemovedBar {
+                                ctor public RemovedBar();
+                                method public void bar();
+                                method public void deletedFromRemovedBar();
+                              }
+                            }
+                        """,
+                    )
+            args +=
+                ARG_REMOVED_API to
+                    signature(
+                        "removed.txt",
+                        """
+                            // Signature format: 2.0
+                            package test.pkg {
+                              public class Foo {
+                                method public final void changedMethod();
+                              }
+                              public class RemovedBar {
+                                ctor public RemovedBar();
+                                method public void bar();
+                              }
+                            }
+                        """,
+                    )
+            args +=
+                signature(
+                    "current.txt",
+                    """
+                        // Signature format: 2.0
+                        package test.pkg {
+                          public class Foo {
+                            ctor public Foo();
+                          }
+                        }
+                    """,
+                )
+
+            // TODO(b/571827848): Should report AddedFinal on changedMethod() and RemovedMethod on
+            //  deletedFromRemovedBar() instead of reporting changedMethod() and RemovedBar as
+            //  removed.
+            expectedStderr =
+                """
+                    TESTROOT/released.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.changedMethod() [RemovedMethod]
+                    TESTROOT/released.txt:7: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+
+                    Aborting: Found compatibility problems checking the public API (TESTROOT/current.txt) against the API in TESTROOT/released.txt
+                """
+                    .trimIndent()
+
+            verify { assertEquals(-1, exitCode) }
         }
     }
 }

@@ -4718,6 +4718,122 @@ class CompatibilityCheckTest : DriverTest() {
         )
     }
 
+    @Test
+    fun `Items moved to removed API via RemovedFromApi`() {
+        check(
+            apiSurface = KnownApiSurface.PUBLIC,
+            checkCompatibilityApiReleased =
+                """
+                    // Signature format: 2.0
+                    package test.pkg {
+                      public class Foo {
+                        ctor public Foo();
+                        method public void removedMethod();
+                        field public static final int REMOVED_FIELD = 1;
+                      }
+                      public class RemovedBar {
+                        ctor public RemovedBar();
+                        method public void bar();
+                      }
+                    }
+                """,
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.annotation.RemovedFromApi;
+
+                            public class Foo {
+                                @RemovedFromApi
+                                public void removedMethod() {}
+
+                                @RemovedFromApi
+                                public static final int REMOVED_FIELD = 1;
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.annotation.RemovedFromApi;
+
+                            @RemovedFromApi
+                            public class RemovedBar {
+                                public void bar() {}
+                            }
+                        """
+                    ),
+                ),
+            // TODO(b/571827848): Items moved to the removed API via @RemovedFromApi should not be
+            //  reported as removed.
+            expectedIssues =
+                """
+                    released-api.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.removedMethod() [RemovedMethod]
+                    released-api.txt:8: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+                """,
+        )
+    }
+
+    @Test
+    fun `Incompatible changes in items moved to removed API via RemovedFromApi`() {
+        check(
+            apiSurface = KnownApiSurface.PUBLIC,
+            checkCompatibilityApiReleased =
+                """
+                    // Signature format: 2.0
+                    package test.pkg {
+                      public class Foo {
+                        ctor public Foo();
+                        method public void changedMethod();
+                      }
+                      public class RemovedBar {
+                        ctor public RemovedBar();
+                        method public void bar();
+                        method public void deletedFromRemovedBar();
+                      }
+                    }
+                """,
+            sourceFiles =
+                arrayOf(
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.annotation.RemovedFromApi;
+
+                            public class Foo {
+                                @RemovedFromApi
+                                public final void changedMethod() {}
+                            }
+                        """
+                    ),
+                    java(
+                        """
+                            package test.pkg;
+
+                            import android.annotation.RemovedFromApi;
+
+                            @RemovedFromApi
+                            public class RemovedBar {
+                                public void bar() {}
+                            }
+                        """
+                    ),
+                ),
+            // TODO(b/571827848): Should report AddedFinal on changedMethod() and RemovedMethod on
+            //  deletedFromRemovedBar() instead of reporting changedMethod() and RemovedBar as
+            //  removed.
+            expectedIssues =
+                """
+                    released-api.txt:5: error: Binary breaking change: Removed method test.pkg.Foo.changedMethod() [RemovedMethod]
+                    released-api.txt:7: error: Binary breaking change: Removed class test.pkg.RemovedBar [RemovedClass]
+                """,
+        )
+    }
+
     // TODO: Check method signatures changing incompatibly (look especially out for adding new
     // overloaded methods and comparator getting confused!)
     //   ..equals on the method items should actually be very useful!
