@@ -35,6 +35,9 @@ Options:
   --api-released <file>                      Previously released API signature file against which compatibility will be
                                              checked. Can be specified multiple times; when multiple files are provided
                                              they must be in order from the narrowest API to the widest API. (required)
+  --removed-api <file>                       Removed API signature file for the current API. Can be specified multiple
+                                             times; when multiple files are provided they must be in order from the
+                                             narrowest API to the widest API.
   --baseline <file>                          An optional baseline file that contains a list of known compatibility
                                              issues which should be ignored.
   --update-baseline <file>                   An optional file into which a list of the latest compatibility issues found

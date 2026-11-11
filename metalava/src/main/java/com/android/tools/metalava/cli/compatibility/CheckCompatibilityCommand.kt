@@ -17,6 +17,7 @@
 package com.android.tools.metalava.cli.compatibility
 
 import com.android.tools.metalava.ARG_BASELINE
+import com.android.tools.metalava.ARG_REMOVED_API
 import com.android.tools.metalava.ARG_UPDATE_BASELINE
 import com.android.tools.metalava.PROGRAM_NAME
 import com.android.tools.metalava.cli.common.BaselineOptionsMixin
@@ -35,6 +36,7 @@ import com.android.tools.metalava.model.Codebase
 import com.android.tools.metalava.model.annotation.DefaultAnnotationManager
 import com.android.tools.metalava.model.api.surface.ApiSurfacePredicate
 import com.android.tools.metalava.model.api.surface.ApiSurfaces
+import com.android.tools.metalava.model.api.surface.ApiVariantType
 import com.android.tools.metalava.model.text.SignatureFile
 import com.android.tools.metalava.reporter.Baseline
 import com.android.tools.metalava.reporter.DefaultReporter
@@ -72,6 +74,22 @@ class CheckCompatibilityCommand :
             )
             .existingFile()
             .multiple(required = true)
+
+    /** Removed API signature files for the current API. */
+    private val removedApiFiles by
+        option(
+                ARG_REMOVED_API,
+                metavar = "<file>",
+                help =
+                    """
+                        Removed API signature file for the current API. Can be specified multiple
+                        times; when multiple files are provided they must be in order from the
+                        narrowest API to the widest API.
+                    """
+                        .trimIndent(),
+            )
+            .existingFile()
+            .multiple()
 
     private val baselineOptionsMixin =
         BaselineOptionsMixin(
@@ -154,7 +172,13 @@ class CheckCompatibilityCommand :
             val signatureFileLoader = DefaultSignatureFileLoader(codebaseConfig, tracer = tracer)
 
             val oldCodebase = signatureFileLoader.load(SignatureFile.fromFiles(releasedFiles))
-            val newCodebase = signatureFileLoader.load(SignatureFile.fromFiles(sourceFiles))
+            val newSignatureFiles =
+                SignatureFile.fromFiles(sourceFiles) +
+                    SignatureFile.fromFiles(
+                        removedApiFiles,
+                        apiVariantTypeChooser = { ApiVariantType.REMOVED },
+                    )
+            val newCodebase = signatureFileLoader.load(newSignatureFiles)
 
             tracer.trace("CompatibilityCheck.checkCompatibility") {
                 CompatibilityCheck.checkCompatibility(
