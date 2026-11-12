@@ -22,6 +22,7 @@ import com.android.tools.metalava.CONFIG_FILE_OPTIONS_HELP
 import com.android.tools.metalava.KnownConfigFiles
 import com.android.tools.metalava.apilevels.VersionedApi
 import com.android.tools.metalava.cli.common.BaseCommandTest
+import com.android.tools.metalava.cli.common.ISSUE_REPORTING_OPTIONS_HELP
 import com.android.tools.metalava.testing.signature
 import com.android.tools.metalava.testing.xml
 import com.google.gson.GsonBuilder
@@ -105,6 +106,8 @@ Options:
   -h, -?, --help                             Show this message and exit
 
 $CONFIG_FILE_OPTIONS_HELP
+
+$ISSUE_REPORTING_OPTIONS_HELP
     """
         .trimIndent()
 
