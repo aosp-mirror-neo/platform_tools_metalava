@@ -15,6 +15,7 @@
  */
 package com.android.tools.metalava.apilevels
 
+import com.android.tools.metalava.reporter.Reporter
 import java.util.Collections
 import java.util.TreeMap
 import java.util.TreeSet
@@ -273,6 +274,22 @@ class Api(val useInternalNames: Boolean) : ParentApiElement {
                     "make metalava remove these references instead of erroring out." +
                     message
             )
+        }
+    }
+
+    /**
+     * Removes any classes or class members that were only present in historical SDK extension
+     * versions and not in the latest SDK extension version or any platform SDK version, reporting
+     * an issue for each one.
+     */
+    fun removeInconsistentExtensionElements(reporter: Reporter) {
+        // If `since` was never initialized then the class was only seen in an older SDK extension
+        // version; report and remove the whole class rather than reporting each of its members
+        // individually.
+        mClasses.removeInconsistentExtensionElements(reporter) { "Class ${it.name}" }
+
+        for (cls in mClasses.values) {
+            cls.removeInconsistentExtensionElements(reporter)
         }
     }
 }

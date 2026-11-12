@@ -128,6 +128,7 @@ Available Issues                             |  Category                        
   HidingApiMethodOverrideClasspath           |  api_lint                             |   hidden
   HidingRecordComponent                      |  api_lint                             |   error
   IgnoringSymlink                            |  unknown                              |   info
+  InconsistentApiHistory                     |  unknown                              |   error
   InconsistentMergeAnnotation                |  api_lint                             |   warning_error_when_new
   InfixRemoval                               |  source_compatibility_only            |   error
   InheritChangesSignature                    |  unknown                              |   warning_error_when_new

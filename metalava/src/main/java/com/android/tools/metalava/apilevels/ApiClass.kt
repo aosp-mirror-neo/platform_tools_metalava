@@ -15,6 +15,8 @@
  */
 package com.android.tools.metalava.apilevels
 
+import com.android.tools.metalava.reporter.Reporter
+
 /**
  * Represents a class or an interface and its methods/fields. This is used to write the simplified
  * XML file containing all the public API.
@@ -376,5 +378,25 @@ class ApiClass(name: String, private val isEnum: Boolean) : ApiElement(name) {
             }
         }
         return result
+    }
+
+    /**
+     * Removes any members or supertypes of this class that were only present in historical SDK
+     * extension versions and not in the latest SDK extension version or any platform SDK version,
+     * reporting an issue for each one.
+     */
+    fun removeInconsistentExtensionElements(reporter: Reporter) {
+        mSuperClasses.removeInconsistentExtensionElements(reporter, mainlineModule) {
+            "Superclass ${it.name} of class $name"
+        }
+        mInterfaces.removeInconsistentExtensionElements(reporter, mainlineModule) {
+            "Interface ${it.name} of class $name"
+        }
+        mFields.removeInconsistentExtensionElements(reporter, mainlineModule) {
+            "Field $name.${it.name}"
+        }
+        mMethods.removeInconsistentExtensionElements(reporter, mainlineModule) {
+            "Method $name.${it.name}"
+        }
     }
 }

@@ -320,6 +320,13 @@ object Issues {
     val VALUE_CLASS_DEFINITION by Issue(Severity.ERROR, Category.API_LINT)
     val MISSING_ENVIRONMENTS_VALUE by Issue(Severity.ERROR, Category.API_LINT)
     val INHERIT_CHANGES_SIGNATURE by Issue(Severity.WARNING_ERROR_WHEN_NEW)
+
+    /**
+     * Reported when an API element was added in an older SDK extension version but is missing from
+     * the latest SDK extension version and all platform SDK versions.
+     */
+    val INCONSISTENT_API_HISTORY by Issue(Severity.ERROR)
+
     val DATA_CLASS_DEFINITION by Issue(Severity.HIDDEN, Category.API_LINT)
     // TODO(b/165356974): set this to error once AndroidX selectively opts-in for projects that
     // target Java

@@ -15,6 +15,9 @@
  */
 package com.android.tools.metalava.apilevels
 
+import com.android.tools.metalava.reporter.Issues
+import com.android.tools.metalava.reporter.Reporter
+
 /** Represents a parent of [ApiElement]. */
 interface ParentApiElement {
     /** The API version this API was first introduced in. */
@@ -90,6 +93,10 @@ open class ApiElement(val name: String) : ParentApiElement, Comparable<ApiElemen
      */
     final override lateinit var since: ApiVersion
         protected set
+
+    /** True if [since] has been initialized. */
+    internal val isSinceInitialized: Boolean
+        get() = ::since.isInitialized
 
     /**
      * The extension version of this ApiElement. i.e. The Android extension SDK version this API was
@@ -218,6 +225,30 @@ open class ApiElement(val name: String) : ParentApiElement, Comparable<ApiElemen
 
     override fun compareTo(other: ApiElement): Int {
         return name.compareTo(other.name)
+    }
+}
+
+/**
+ * Removes any [ApiElement] in this map whose [ApiElement.since] property has not been initialized,
+ * reporting an [Issues.INCONSISTENT_API_HISTORY] issue for each one.
+ */
+internal fun <T : ApiElement> MutableMap<String, T>.removeInconsistentExtensionElements(
+    reporter: Reporter,
+    mainlineModule: String? = null,
+    describeElement: (T) -> String,
+) {
+    values.removeAll { element ->
+        if (!element.isSinceInitialized) {
+            val module = element.mainlineModule ?: mainlineModule
+            reporter.report(
+                Issues.INCONSISTENT_API_HISTORY,
+                reportable = null,
+                "${describeElement(element)} was added in SDK extension ${element.sinceExtension} (module $module) but is missing from the latest SDK extension and all SDK versions",
+            )
+            true
+        } else {
+            false
+        }
     }
 }
 

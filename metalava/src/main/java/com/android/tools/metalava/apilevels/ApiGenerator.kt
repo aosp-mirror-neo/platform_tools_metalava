@@ -45,6 +45,9 @@ class ApiGenerator(
 
         // If necessary, update the sdks properties.
         config.sdkExtensionsArguments?.let { sdkExtensionsArguments ->
+            // Remove and report any elements that were only present in older SDK extensions and
+            // therefore do not have an initialized `since` version before updating `sdks`.
+            api.removeInconsistentExtensionElements(reporter)
             tracer.trace("updateSdksAttributes") {
                 updateSdksAttributes(
                     api,
