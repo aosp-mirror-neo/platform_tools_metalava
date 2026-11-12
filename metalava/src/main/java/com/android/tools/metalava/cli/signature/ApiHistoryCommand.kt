@@ -42,6 +42,7 @@ import com.android.tools.metalava.cli.common.stderr
 import com.android.tools.metalava.cli.common.tracer
 import com.android.tools.metalava.model.Codebase
 import com.android.tools.metalava.reporter.BasicReporter
+import com.android.tools.metalava.reporter.Reporter
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.options.OptionWithValues
 import com.github.ajalt.clikt.parameters.options.convert
@@ -309,11 +310,20 @@ class ApiHistoryCommand :
             cliError("Must specify $ARG_CURRENT_VERSION with $ARG_CURRENT_FILES")
         }
 
+        val reporter = BasicReporter(stderr)
+        generateApiHistory(reporter, useInternalNames)
+    }
+
+    /** Generates the API history using [reporter] and [useInternalNames]. */
+    private fun generateApiHistory(
+        reporter: Reporter,
+        useInternalNames: Boolean,
+    ) {
         val apiSurfaces = apiSurfaceName?.let { configFileOptions.apiSurfacesForTargetSurface(it) }
 
         val codebaseConfig =
             Codebase.Config(
-                reporter = BasicReporter(stderr),
+                reporter = reporter,
             )
         val signatureFileLoader =
             DefaultSignatureFileLoader(
