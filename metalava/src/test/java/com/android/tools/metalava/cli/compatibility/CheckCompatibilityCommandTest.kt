@@ -19,7 +19,9 @@ package com.android.tools.metalava.cli.compatibility
 import com.android.tools.metalava.ARG_BASELINE
 import com.android.tools.metalava.ARG_REMOVED_API
 import com.android.tools.metalava.ARG_UPDATE_BASELINE
+import com.android.tools.metalava.cli.common.ARG_HIDE
 import com.android.tools.metalava.cli.common.BaseCommandTest
+import com.android.tools.metalava.cli.common.ISSUE_REPORTING_OPTIONS_HELP
 import com.android.tools.metalava.testing.signature
 import com.android.tools.metalava.testing.source
 import kotlin.test.assertEquals
@@ -51,6 +53,8 @@ Options:
                                              issues will be reported as errors. If --delete-empty-baselines is specified
                                              and this baseline is empty then the file will be deleted.
   -h, -?, --help                             Show this message and exit
+
+$ISSUE_REPORTING_OPTIONS_HELP
 
 Arguments:
   <files>                                    Signature files defining the current API to check for compatibility. When
@@ -438,6 +442,39 @@ class CheckCompatibilityCommandTest :
                     .trimIndent()
 
             verify { assertEquals(-1, exitCode) }
+        }
+    }
+
+    @Test
+    fun `Test issue reporting options`() {
+        commandTest {
+            args += listOf("check-compatibility", ARG_HIDE, "RemovedMethod")
+            args +=
+                ARG_API_RELEASED to
+                    signature(
+                        "released.txt",
+                        """
+                            // Signature format: 2.0
+                            package test.pkg {
+                              public class Foo {
+                                ctor public Foo();
+                                method public void removedMethod();
+                              }
+                            }
+                        """,
+                    )
+            args +=
+                signature(
+                    "current.txt",
+                    """
+                        // Signature format: 2.0
+                        package test.pkg {
+                          public class Foo {
+                            ctor public Foo();
+                          }
+                        }
+                    """,
+                )
         }
     }
 }
