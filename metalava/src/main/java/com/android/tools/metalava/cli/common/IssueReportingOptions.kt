@@ -18,11 +18,11 @@ package com.android.tools.metalava.cli.common
 
 import com.android.tools.metalava.PROGRAM_NAME
 import com.android.tools.metalava.config.IssuesConfig
+import com.android.tools.metalava.reporter.Baseline
 import com.android.tools.metalava.reporter.DefaultReporter
 import com.android.tools.metalava.reporter.ERROR_WHEN_NEW_SUFFIX
 import com.android.tools.metalava.reporter.IssueConfiguration
 import com.android.tools.metalava.reporter.Issues
-import com.android.tools.metalava.reporter.Reporter
 import com.android.tools.metalava.reporter.Severity
 import com.android.tools.metalava.trace
 import com.github.ajalt.clikt.core.CliktCommand
@@ -205,21 +205,50 @@ class IssueReportingOptions() :
 }
 
 /**
- * Configure a [DefaultReporter] from [issueReportingOptions] and optional [issuesConfig], run
- * [action] with it, write saved reports in a `finally` block, and repeat errors and throw a
- * [MetalavaCliException] with exit code `-1` if any errors were reported.
+ * Configure a [DefaultReporter] from [issueReportingOptions], optional [issuesConfig], and optional
+ * [baselineOptionsMixin], run [action] with it, write saved reports in a `finally` block, and
+ * repeat errors and throw a [MetalavaCliException] with exit code `-1` if any errors were reported.
  */
 fun CliktCommand.runWithReporter(
     issueReportingOptions: IssueReportingOptions,
     issuesConfig: IssuesConfig? = null,
-    action: (Reporter) -> Unit,
+    baselineOptionsMixin: BaselineOptionsMixin? = null,
+    action: (DefaultReporter) -> Unit,
 ) {
     // Configure the issue reporter from CLI options and any <issues> elements in config files.
     val computedIssueReportingOptions = issueReportingOptions.compute(commonOptions, issuesConfig)
+    val issueConfiguration = computedIssueReportingOptions.issueConfiguration
+    val baseline =
+        baselineOptionsMixin?.computeBaseline(
+            executionEnvironment = executionEnvironment,
+            baselineConfig =
+                Baseline.Config(
+                    issueConfiguration = issueConfiguration,
+                    deleteEmptyBaselines = false,
+                    sourcePath = emptyList(),
+                    rootFolder = executionEnvironment.reporterEnvironment.rootFolder,
+                ),
+        )
+
+    // Make sure to flush out the baseline file.
+    if (baseline != null) {
+        registerPostCommandAction {
+            if (commonOptions.verbosity.verbose) {
+                baseline.dumpStats(stdout)
+            }
+            if (baseline.close()) {
+                if (!commonOptions.verbosity.quiet) {
+                    stdout.println("$PROGRAM_NAME wrote updated baseline to ${baseline.updateFile}")
+                }
+            }
+        }
+    }
+
     val reporter =
         DefaultReporter(
             environment = executionEnvironment.reporterEnvironment,
-            issueConfiguration = computedIssueReportingOptions.issueConfiguration,
+            issueConfiguration = issueConfiguration,
+            baseline = baseline,
             config = computedIssueReportingOptions.reporterConfig,
         )
 
