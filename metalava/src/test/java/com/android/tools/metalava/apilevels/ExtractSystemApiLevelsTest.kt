@@ -16,10 +16,11 @@
 
 package com.android.tools.metalava.apilevels
 
-import com.android.tools.metalava.ARG_ANDROID_JAR_PATTERN
-import com.android.tools.metalava.ARG_API_VERSION_FOR_SOURCES
-import com.android.tools.metalava.ARG_GENERATE_API_LEVELS
-import com.android.tools.metalava.ARG_SDK_INFO_FILE
+import com.android.tools.metalava.ARG_API_SURFACE
+import com.android.tools.metalava.ARG_CONFIG_FILE
+import com.android.tools.metalava.KnownConfigFiles
+import com.android.tools.metalava.cli.signature.ARG_API_VERSION_FOR_SDK_EXTENSION
+import com.android.tools.metalava.cli.signature.ARG_SDK_INFO_FILE
 import com.android.tools.metalava.doc.getApiLookup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -28,24 +29,39 @@ import org.junit.Test
 class ExtractSystemApiLevelsTest : ApiGeneratorIntegrationTestBase() {
     @Test
     fun `Extract System API`() {
-        val androidJarPattern = "${platformJars.path}/{version:level}/system/android.jar"
+        val androidSignaturePattern =
+            "${platformJars.path}/{version:level}/{surface}/api/android.txt"
+        // Make sure to only use system and public extension signature files.
+        val extensionSignaturePattern =
+            "${extensionSdkJars.path}/{version:extension}/{surface}/api/{module}.txt"
 
-        check(
-            extraArguments =
-                arrayOf(
-                    ARG_GENERATE_API_LEVELS,
+        commandTest {
+            args +=
+                listOf(
+                    "api-history",
+                    ARG_CONFIG_FILE,
+                    KnownConfigFiles.configKnownTestSurfaces.createFile(temporaryFolder.root).path,
+                    ARG_API_SURFACE,
+                    "system",
+                    "--output-file",
                     outputPath,
-                    ARG_ANDROID_JAR_PATTERN,
-                    androidJarPattern,
-                    ARG_ANDROID_JAR_PATTERN,
-                    // Make sure to only use system extension jars.
-                    "${extensionSdkJars.path}/{version:extension}/system/{module}.jar",
+                    "--historical-versions",
+                    "21:36",
+                    "--pattern",
+                    androidSignaturePattern,
+                    "--pattern",
+                    extensionSignaturePattern,
+                    "--historical-files",
+                    findHistoricalFiles(
+                        androidSignaturePattern,
+                        extensionSignaturePattern,
+                    ),
                     ARG_SDK_INFO_FILE,
                     createSdkExtensionInfoFile().path,
-                    ARG_API_VERSION_FOR_SOURCES,
-                    "34"
+                    ARG_API_VERSION_FOR_SDK_EXTENSION,
+                    "34",
                 )
-        )
+        }
 
         assertTrue(output.isFile)
         val xml = output.readText(Charsets.UTF_8)
