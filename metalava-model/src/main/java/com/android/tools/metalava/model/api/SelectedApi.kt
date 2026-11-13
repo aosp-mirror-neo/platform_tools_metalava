@@ -78,6 +78,12 @@ sealed class SelectedApi {
     open fun hasRemovedAnnotation(): Boolean = false
 
     /**
+     * Checks to see whether the associated [SelectableItem] was part of the previously released
+     * API.
+     */
+    open fun wasPreviouslyReleased(): Boolean = false
+
+    /**
      * Initialize this instance.
      *
      * This is called after this has been created and assigned to
@@ -129,9 +135,6 @@ sealed class SelectedApi {
             // Get the ApiSurfaceSelector that is used by the AnnotationManager.
             val annotationManager = config.annotationManager
             val apiSurfaceSelector = annotationManager.apiSurfaceSelector
-            val previouslyReleasedCodebaseProvider = {
-                annotationManager.previouslyReleasedCodebase
-            }
 
             // Create an updater that will be captured by the factory below and will be used by all
             // SelectedApi instances in the Codebase that uses tha factory.
@@ -139,7 +142,7 @@ sealed class SelectedApi {
                 SelectedApiUpdater(
                     config.reporter,
                     apiSurfaceSelector,
-                    previouslyReleasedCodebaseProvider,
+                    config.previouslyReleasedCodebaseProvider,
                 )
             return { item -> createFromSource(selectedApiUpdater, item) }
         }
