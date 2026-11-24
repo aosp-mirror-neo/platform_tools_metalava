@@ -584,14 +584,14 @@ fun MutableModifierList.addDefaultRetentionPolicyAnnotation(
     val policyValue =
         Value.createFieldReferenceValue(
             codebase,
-            RetentionPolicy::class.qualifiedName!!,
+            RetentionPolicy::class.java.name,
             defaultRetentionPolicy.name
         )
     // Create a retention annotation.
     val retentionAnnotation =
         AnnotationItem.createSingleElementAnnotation(
             codebase,
-            Retention::class.qualifiedName!!,
+            Retention::class.java.name,
             policyValue,
         )
     // Add the retention annotation.

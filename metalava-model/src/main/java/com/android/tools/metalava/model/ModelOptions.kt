@@ -16,9 +16,6 @@
 
 package com.android.tools.metalava.model
 
-import kotlin.reflect.KClass
-import kotlin.reflect.cast
-
 /**
  * A type safe, immutable set of model options.
  *
@@ -33,7 +30,7 @@ private constructor(
 ) {
     /** Get an option value using the type safe [Key]. */
     operator fun <T : Any> get(key: Key<T>): T {
-        return settings[key]?.let { key.kClass.cast(it) } ?: key.default
+        return settings[key]?.let { key.jClass.cast(it) } ?: key.default
     }
 
     override fun toString(): String {
@@ -84,10 +81,10 @@ private constructor(
     internal constructor(
         internal val name: String,
         internal val default: T,
-        internal val kClass: KClass<T>
+        internal val jClass: Class<T>,
     ) {
 
-        override fun toString() = "Key($name, $default, $kClass)"
+        override fun toString() = "Key($name, $default, $jClass)"
 
         companion object {
             /**
@@ -100,7 +97,7 @@ private constructor(
              * @param default the default value of the key.
              */
             inline fun <reified T : Any> of(name: String, default: T): Key<T> {
-                return Key(name, default, T::class)
+                return Key(name, default, T::class.javaObjectType)
             }
         }
     }
