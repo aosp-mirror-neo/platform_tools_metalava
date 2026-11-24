@@ -28,6 +28,12 @@ java_library_host {
         "src/main/java/**/*.java",
         "src/main/java/**/*.kt",
     ],
+    javacflags: [
+        "-parameters",
+    ],
+    kotlincflags: [
+        "-java-parameters",
+    ],
     java_resources: [
         ":metalava-version",
         ":metalava-resources",

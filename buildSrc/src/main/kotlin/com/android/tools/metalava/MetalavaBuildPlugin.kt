@@ -34,6 +34,7 @@ import org.gradle.api.tasks.ClasspathNormalizer
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Zip
+import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.gradle.kotlin.dsl.create
@@ -57,6 +58,9 @@ class MetalavaBuildPlugin : Plugin<Project> {
                         sourceCompatibility = JavaVersion.VERSION_17
                         targetCompatibility = JavaVersion.VERSION_17
                     }
+                    project.tasks.withType(JavaCompile::class.java).configureEach { task ->
+                        task.options.compilerArgs.add("-parameters")
+                    }
                 }
                 is KotlinBasePluginWrapper -> {
                     project.tasks.withType(KotlinCompile::class.java).configureEach { task ->
@@ -65,6 +69,7 @@ class MetalavaBuildPlugin : Plugin<Project> {
                             apiVersion.set(KotlinVersion.KOTLIN_2_2)
                             languageVersion.set(KotlinVersion.KOTLIN_2_2)
                             allWarningsAsErrors.set(true)
+                            javaParameters.set(true)
                         }
                     }
                 }

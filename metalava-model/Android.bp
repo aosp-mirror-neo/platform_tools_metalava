@@ -23,6 +23,12 @@ java_library_host {
         "src/main/java/**/*.java",
         "src/main/java/**/*.kt",
     ],
+    javacflags: [
+        "-parameters",
+    ],
+    kotlincflags: [
+        "-java-parameters",
+    ],
     libs: [
         "kotlin-reflect",
     ],
