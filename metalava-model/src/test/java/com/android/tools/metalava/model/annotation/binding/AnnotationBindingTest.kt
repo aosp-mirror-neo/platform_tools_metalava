@@ -17,6 +17,7 @@
 package com.android.tools.metalava.model.annotation.binding
 
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -105,5 +106,44 @@ class AnnotationBindingTest {
     fun `Test parameter with unsupported type`() {
         // Just ignores the unsupported type for now.
         AnnotationBinding(UnsupportedType::class, null)
+    }
+
+    @Suppress("ArrayInDataClass")
+    data class UnsupportedGenericArray(val arr: Array<Pair<Int, Int>>)
+
+    @Test
+    fun `Test parameter with generic array type is ignored`() {
+        AnnotationBinding(UnsupportedGenericArray::class, null)
+    }
+
+    @JvmInline value class InlineInt(val value: Int)
+
+    data class UnsupportedValueClassParameter(val inlineInt: InlineInt)
+
+    data class BoxedValueClassParameter(
+        val inlineInt: InlineInt? = InlineInt(8),
+        val value: String,
+    )
+
+    data class ListOfValueClassParameter(val values: List<InlineInt>)
+
+    @Test
+    fun `Test List of value class type is rejected`() {
+        val exception =
+            assertThrows(IllegalStateException::class.java) {
+                AnnotationBinding(ListOfValueClassParameter::class, null)
+            }
+        assertTrue(exception.message!!.startsWith("unsupported element type: "))
+    }
+
+    @Test
+    fun `Test parameter with value class type`() {
+        // TODO(b/499055608): Under Java reflection, `kotlinc` lowers constructors with direct
+        //  `@JvmInline value class` parameters (boxed or unboxed) to private constructors with a
+        //  synthetic `DefaultConstructorMarker` bridge (omitting nullability metadata and unboxing
+        //  non-null / reference-backed value classes), so they should be rejected rather than
+        //  silently binding unboxed carrier types or dropping sibling nullability.
+        AnnotationBinding(UnsupportedValueClassParameter::class, null)
+        AnnotationBinding(BoxedValueClassParameter::class, null)
     }
 }

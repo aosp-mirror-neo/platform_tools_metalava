@@ -158,6 +158,60 @@ class CommonParameterizedAnnotationBindingTest : BaseModelTest() {
     /** Binding for [requiredClassReferenceAnnotation] and similar. */
     data class ClassItemAnno(val c: ClassItem)
 
+    /**
+     * Binding with both a required non-nullable reference parameter (no zero value) and an optional
+     * parameter with a Kotlin default value.
+     */
+    data class ClassItemWithDefaultIntAnno(
+        val c: ClassItem,
+        val count: Int = 7,
+    )
+
+    /**
+     * Binding with a required non-nullable reference parameter referenced by another parameter's
+     * Kotlin default expression.
+     */
+    data class ClassItemWithCrossParamDefaultAnno(
+        val c: ClassItem,
+        val name: String = c.qualifiedName(),
+    )
+
+    /**
+     * Binding whose primary constructor parameters all have Kotlin defaults (causing `kotlinc` to
+     * generate a no-arg `()V` constructor) and which also declares a `Unit`-returning property
+     * (whose getter puts `()V` in `@Metadata.data2`).
+     */
+    data class AllDefaultedAnno(
+        val first: Int = 1,
+        val second: String = "a",
+    ) {
+        @Suppress("unused")
+        val unit: Unit
+            get() = Unit
+    }
+
+    /**
+     * Binding using `@JvmOverloads` (generating telescopic `()V` and `(I)V` constructors) and
+     * declaring a mutable `Int` property (whose setter puts `(I)V` in `@Metadata.data2`).
+     */
+    data class JvmOverloadsAnno
+    @JvmOverloads
+    constructor(
+        val first: Int = 1,
+        val second: String = "a",
+    ) {
+        @Suppress("unused") var mutableInt: Int = 0
+    }
+
+    /**
+     * Binding with an unsupported parameter type ([CharSequence] interface) that has a Kotlin
+     * default; verifies that matching annotation attributes are ignored rather than bound.
+     */
+    data class IgnoredDefaultedParamAnno(
+        val ignored: CharSequence = "default",
+        val value: String,
+    )
+
     companion object : Assertions {
         /** See [BooleanAnno]. */
         private val requiredBooleanAnnotation =
@@ -262,6 +316,28 @@ class CommonParameterizedAnnotationBindingTest : BaseModelTest() {
                     package test.pkg;
                     public @interface ClassAnno {
                         Class<?> c();
+                    }
+                """
+            )
+
+        private val allDefaultedAnnotation =
+            java(
+                """
+                    package test.pkg;
+                    public @interface AllDefaultedAnno {
+                        int first();
+                        String second();
+                    }
+                """
+            )
+
+        private val ignoredParamAnnotation =
+            java(
+                """
+                    package test.pkg;
+                    public @interface IgnoredParamAnno {
+                        String ignored();
+                        String value();
                     }
                 """
             )
@@ -506,6 +582,73 @@ class CommonParameterizedAnnotationBindingTest : BaseModelTest() {
                         """
                             MAIN_SRC/src/test/pkg/Test.java:2: error: Attribute 'c' is invalid: `Unknown.class` cannot be converted to com.android.tools.metalava.model.ClassItem [InvalidAnnotationBinding]
                         """,
+                ),
+                testParams<ClassItemWithDefaultIntAnno>(
+                    name = "ClassItem missing attribute on class with Kotlin default",
+                    sourceFiles = listOf(requiredClassReferenceAnnotation),
+                    annotation = """@ClassAnno()""",
+                    expectedBound = null,
+                    expectedIssues =
+                        """
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'c' is missing on @test.pkg.ClassAnno [MissingRequiredAttribute]
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'count' is missing on @test.pkg.ClassAnno [MissingRequiredAttribute]
+                        """,
+                ),
+                testParams<ClassItemWithCrossParamDefaultAnno>(
+                    name =
+                        "ClassItem missing attribute on class with cross-parameter Kotlin default",
+                    sourceFiles = listOf(requiredClassReferenceAnnotation),
+                    annotation = """@ClassAnno()""",
+                    expectedBound = null,
+                    expectedIssues =
+                        """
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'c' is missing on @test.pkg.ClassAnno [MissingRequiredAttribute]
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'name' is missing on @test.pkg.ClassAnno [MissingRequiredAttribute]
+                        """,
+                ),
+
+                // All-defaulted and @JvmOverloads constructor selection tests
+                testParams(
+                    name = "all-defaulted constructor with explicit attributes",
+                    sourceFiles = listOf(allDefaultedAnnotation),
+                    annotation = """@AllDefaultedAnno(first = 42, second = "b")""",
+                    expectedBound = AllDefaultedAnno(first = 42, second = "b"),
+                ),
+                testParams(
+                    name = "all-defaulted constructor with omitted attributes",
+                    sourceFiles = listOf(allDefaultedAnnotation),
+                    annotation = """@AllDefaultedAnno()""",
+                    expectedBound = AllDefaultedAnno(first = 1, second = "a"),
+                    expectedIssues =
+                        """
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'first' is missing on @test.pkg.AllDefaultedAnno [MissingRequiredAttribute]
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'second' is missing on @test.pkg.AllDefaultedAnno [MissingRequiredAttribute]
+                        """,
+                ),
+                testParams(
+                    name = "JvmOverloads constructor with explicit attributes",
+                    sourceFiles = listOf(allDefaultedAnnotation),
+                    annotation = """@AllDefaultedAnno(first = 42, second = "b")""",
+                    expectedBound = JvmOverloadsAnno(first = 42, second = "b"),
+                ),
+                testParams(
+                    name = "JvmOverloads constructor with omitted attributes",
+                    sourceFiles = listOf(allDefaultedAnnotation),
+                    annotation = """@AllDefaultedAnno()""",
+                    expectedBound = JvmOverloadsAnno(first = 1, second = "a"),
+                    expectedIssues =
+                        """
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'first' is missing on @test.pkg.AllDefaultedAnno [MissingRequiredAttribute]
+                            MAIN_SRC/src/test/pkg/Test.java:2: error: Required attribute 'second' is missing on @test.pkg.AllDefaultedAnno [MissingRequiredAttribute]
+                        """,
+                ),
+
+                // Ignored parameter tests
+                testParams(
+                    name = "unsupported defaulted parameter is ignored",
+                    sourceFiles = listOf(ignoredParamAnnotation),
+                    annotation = """@IgnoredParamAnno(ignored = "override", value = "a")""",
+                    expectedBound = IgnoredDefaultedParamAnno(ignored = "default", value = "a"),
                 ),
 
                 // Item binding tests
