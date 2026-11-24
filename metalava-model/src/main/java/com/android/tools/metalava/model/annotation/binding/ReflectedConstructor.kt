@@ -141,8 +141,18 @@ private constructor(
         private val Class<*>.qualifiedDisplayName: String
             get() = canonicalName ?: name
 
-        /** Get a [ReflectedConstructor] for [jClass]. */
-        fun <T : Any> of(jClass: Class<T>): ReflectedConstructor<T> = ReflectedConstructor(jClass)
+        /** Per-[Class] cache of reflected constructor and parameter metadata. */
+        private val cache =
+            object : ClassValue<ReflectedConstructor<*>>() {
+                override fun computeValue(type: Class<*>): ReflectedConstructor<*> {
+                    @Suppress("UNCHECKED_CAST") return ReflectedConstructor(type as Class<Any>)
+                }
+            }
+
+        /** Get the cached [ReflectedConstructor] for [jClass]. */
+        @Suppress("UNCHECKED_CAST")
+        fun <T : Any> of(jClass: Class<T>): ReflectedConstructor<T> =
+            cache.get(jClass) as ReflectedConstructor<T>
 
         /**
          * Select the binding constructor to use on this [Class].

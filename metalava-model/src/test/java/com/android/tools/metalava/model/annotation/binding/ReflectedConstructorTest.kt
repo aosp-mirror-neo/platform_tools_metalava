@@ -19,6 +19,7 @@ package com.android.tools.metalava.model.annotation.binding
 import java.lang.reflect.InvocationTargetException
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -358,5 +359,12 @@ class ReflectedConstructorTest {
                 usedDefaultMasks = false,
             )
         )
+    }
+
+    @Test
+    fun `Test ReflectedConstructor is cached per Class`() {
+        val first = ReflectedConstructor.of(SimplePair::class.java)
+        val second = ReflectedConstructor.of(SimplePair::class.java)
+        assertSame(first, second)
     }
 }
