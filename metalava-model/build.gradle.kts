@@ -24,7 +24,6 @@ plugins {
 
 dependencies {
     implementation(project(":metalava-reporter"))
-    implementation(kotlin("reflect"))
 
     testImplementation(project(":metalava-testing"))
     testImplementation(libs.junit4)
@@ -38,4 +37,11 @@ dependencies {
     testFixturesImplementation(libs.truth)
     testFixturesImplementation(libs.kotlinTest)
     testFixturesImplementation(libs.kotlinTestJUnit)
+}
+
+configurations {
+    // Exclude kotlin-reflect from testRuntimeClasspath (pulled in transitively via
+    // :metalava-testing -> androidLintTests) so unit tests catch accidental kotlin-reflect
+    // runtime dependencies.
+    testRuntimeClasspath { exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect") }
 }

@@ -29,9 +29,6 @@ java_library_host {
     kotlincflags: [
         "-java-parameters",
     ],
-    libs: [
-        "kotlin-reflect",
-    ],
     static_libs: [
         "metalava-reporter",
     ],

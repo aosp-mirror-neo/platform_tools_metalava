@@ -62,8 +62,6 @@ java_binary_host {
         "//visibility:public",
     ],
     static_libs: [
-        "kotlin-reflect",
-
         "metalava-core",
     ],
     main_class: "com.android.tools.metalava.Driver",
