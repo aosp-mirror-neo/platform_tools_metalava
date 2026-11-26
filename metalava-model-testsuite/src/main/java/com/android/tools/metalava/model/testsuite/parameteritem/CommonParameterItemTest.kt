@@ -22,6 +22,10 @@ import com.android.tools.metalava.model.testing.SupportedInputFormats
 import com.android.tools.metalava.model.testing.testTypeString
 import com.android.tools.metalava.model.testsuite.BaseModelTest
 import com.android.tools.metalava.testing.KnownSourceFiles
+import com.android.tools.metalava.testing.TestFileCache
+import com.android.tools.metalava.testing.TestFileCacheRule
+import com.android.tools.metalava.testing.cacheIn
+import com.android.tools.metalava.testing.jarFromSources
 import com.android.tools.metalava.testing.java
 import com.android.tools.metalava.testing.kotlin
 import com.google.common.truth.Truth.assertThat
@@ -29,10 +33,35 @@ import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.ClassRule
 import org.junit.Test
 
 /** Common tests for implementations of [ParameterItem]. */
 class CommonParameterItemTest : BaseModelTest() {
+    companion object {
+        /** Create a [TestFileCache] whose lifespan encompasses all the tests in this class. */
+        @ClassRule @JvmField val testFileCacheRule = TestFileCacheRule()
+
+        /**
+         * A jar compiled without `-parameters` so the method parameters have no names stored in
+         * bytecode.
+         */
+        private val binaryClassWithoutParameterNamesJar =
+            jarFromSources(
+                    "binary-class-without-parameter-names.jar",
+                    java(
+                        """
+                            package test.binary;
+
+                            public abstract class BinaryClass {
+                                protected abstract void method(boolean changed, int l, int t, int r, int b);
+                            }
+                        """
+                    ),
+                )
+                .cacheIn(testFileCacheRule)
+    }
+
     @Test
     fun `Test deprecated parameter by annotation`() {
         runCodebaseTest(
@@ -214,27 +243,33 @@ class CommonParameterItemTest : BaseModelTest() {
 
     @SupportedInputFormats(InputFormat.JAVA)
     @Test
-    fun `Test publicName reports correct name when called on binary class - ViewGroup#onLayout`() {
+    fun `Test publicName reports correct name when called on binary class without parameter names`() {
         runCodebaseTest(
-            java(
-                """
-                    package test.pkg;
+            inputSet(
+                java(
+                    """
+                        package test.pkg;
 
-                    public abstract class Bar extends android.view.ViewGroup {
-                    }
-                """
+                        public abstract class Bar extends test.binary.BinaryClass {
+                        }
+                    """
+                ),
             ),
             // No need to check any other sources as the source is not being tested, only used to
             // trigger the test run.
+            testFixture =
+                TestFixture(
+                    additionalClassPath = listOf(binaryClassWithoutParameterNamesJar.toFile()),
+                ),
         ) {
             val parameterItems =
                 codebase
-                    .assertResolvedClass("android.view.ViewGroup")
-                    .assertMethod("onLayout", listOf("boolean", "int", "int", "int", "int"))
+                    .assertResolvedClass("test.binary.BinaryClass")
+                    .assertMethod("method", listOf("boolean", "int", "int", "int", "int"))
                     .parameters()
-            // For some reason ViewGroup.onLayout(boolean, int, int, int, int) does not provide the
-            // actual parameter name. Probably, because it was compiled with an older version of
-            // javac, and/or without the appropriate options to record the parameter name.
+
+            // The binary class was compiled without `-parameters`, so bytecode contains no
+            // parameter names and synthetic names are generated instead.
             val expectedNames = listOf("p", "p1", "p2", "p3", "p4")
             assertEquals("parameter count", parameterItems.size, expectedNames.size)
             for (i in parameterItems.indices) {

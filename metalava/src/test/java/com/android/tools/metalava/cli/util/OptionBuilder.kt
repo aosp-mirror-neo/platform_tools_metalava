@@ -20,6 +20,7 @@ import com.android.tools.lint.checks.infrastructure.TestFile
 import com.android.tools.metalava.ARG_CONFIG_FILE
 import com.android.tools.metalava.cli.common.ARG_CLASS_PATH
 import com.android.tools.metalava.cli.common.ARG_COMPILED_SOURCES
+import com.android.tools.metalava.cli.common.ARG_JDK_HOME
 import com.android.tools.metalava.cli.common.ARG_PROJECT
 import com.android.tools.metalava.cli.common.ARG_SOURCE_FILES
 import com.android.tools.metalava.cli.common.ARG_SOURCE_PATH
@@ -98,6 +99,8 @@ fun TemporaryFolderOwner.testSources(
                     // Classpath isn't needed when it is specified through the project xml
                     add(ARG_PROJECT)
                     add(projectDescriptionFile.absolutePath)
+                    add(ARG_JDK_HOME)
+                    add(System.getProperty("java.home"))
                     // When project description is provided, skip listing (common) sources
                 } else {
                     val androidJar = getAndroidJar()

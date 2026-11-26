@@ -24,7 +24,8 @@ import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
 import org.jetbrains.kotlin.platform.konan.NativePlatforms
 import org.jetbrains.kotlin.platform.wasm.WasmPlatforms
 
-private val standardClasspath = getKotlinStdlibPaths() + getAndroidJar()
+/** Standard classpath entries (Kotlin stdlib jars) included in generated `project.xml` modules. */
+private val standardClasspath = getKotlinStdlibPaths()
 val standardProjectXmlClasspath =
     standardClasspath.joinToString("\n") { "<classpath file=\"$it\"/>" }
 

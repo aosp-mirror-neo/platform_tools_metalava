@@ -22,9 +22,10 @@ import com.android.tools.metalava.model.testsuite.BaseModelTest
 import com.android.tools.metalava.testing.TestFileCache
 import com.android.tools.metalava.testing.TestFileCacheRule
 import com.android.tools.metalava.testing.cacheIn
-import com.android.tools.metalava.testing.getAndroidJar
 import com.android.tools.metalava.testing.jarFromSources
 import com.android.tools.metalava.testing.java
+import java.io.File
+import kotlin.test.assertNull
 import org.junit.ClassRule
 import org.junit.Test
 
@@ -52,6 +53,7 @@ class CommonJarSupportTest : BaseModelTest() {
         runJarSupportTest {
             val resolver = jarSupport.getClassPathResolver(listOf(simpleTestJar.toFile()))
             resolver.assertResolvedClass("test.pkg.Test")
+            assertNull(resolver.resolveClass("java.lang.Object"))
         }
     }
 
@@ -61,12 +63,11 @@ class CommonJarSupportTest : BaseModelTest() {
         runJarSupportTest {
             val resolver =
                 jarSupport.getClassPathResolver(
-                    listOf(
-                        getAndroidJar(),
-                        simpleTestJar.toFile(),
-                    )
+                    listOf(simpleTestJar.toFile()),
+                    jdkHome = File(System.getProperty("java.home")),
                 )
             resolver.assertResolvedClass("test.pkg.Test")
+            resolver.assertResolvedClass("java.lang.Object")
         }
     }
 }

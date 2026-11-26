@@ -33,6 +33,7 @@ interface JarSupport {
      * If an implementation supports this it must provide [Capability.CLASS_PATH_RESOLVER].
      *
      * @param classPath a list of jar [File]s.
+     * @param jdkHome an optional JDK home directory to use as the boot classpath.
      */
-    fun getClassPathResolver(classPath: List<File>): ClassPathResolver
+    fun getClassPathResolver(classPath: List<File>, jdkHome: File? = null): ClassPathResolver
 }

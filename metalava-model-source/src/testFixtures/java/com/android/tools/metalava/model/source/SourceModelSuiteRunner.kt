@@ -27,7 +27,6 @@ import com.android.tools.metalava.model.testsuite.JarSupport
 import com.android.tools.metalava.model.testsuite.ModelSuiteRunner
 import com.android.tools.metalava.model.testsuite.ModelSuiteRunner.SourceDir
 import com.android.tools.metalava.model.testsuite.ModelSuiteRunner.TestConfiguration
-import com.android.tools.metalava.testing.getAndroidJar
 import com.android.tools.metalava.testing.getKotlinStdlibPaths
 import java.io.File
 
@@ -57,7 +56,6 @@ class SourceModelSuiteRunner(private val sourceModelProvider: SourceModelProvide
 
         sourceModelProvider.createEnvironmentManager(forTesting = true).use { environmentManager ->
             val classPath = buildList {
-                add(getAndroidJar())
                 if (inputs.inputFormat == InputFormat.KOTLIN) {
                     addAll(getKotlinStdlibPaths())
                 }
@@ -98,6 +96,7 @@ class SourceModelSuiteRunner(private val sourceModelProvider: SourceModelProvide
                         javaLanguageLevel = testFixture.javaLanguageLevel,
                         modelOptions = inputs.modelOptions,
                         projectDescription = projectDescription,
+                        jdkHome = File(System.getProperty("java.home")),
                     )
                 val sourceParser = environment.createSourceParser(codebaseConfig)
 
@@ -123,6 +122,7 @@ class SourceModelSuiteRunner(private val sourceModelProvider: SourceModelProvide
                 sourceSet = sourceSet(inputs.mainSourceDir, inputs.additionalMainSourceDir),
                 classPath = classPath,
                 projectDescription = inputs.projectDescription,
+                jdkHome = File(System.getProperty("java.home")),
             )
         val sourceParser = environment.createSourceParser(codebaseConfig)
 
@@ -173,17 +173,18 @@ class SourceModelSuiteRunner(private val sourceModelProvider: SourceModelProvide
 /** A [JarSupport] implementation that uses [environmentManager]. */
 private class SourceParserJarSupport(private val environmentManager: EnvironmentManager) :
     JarSupport {
-    private fun createSourceParser(classPath: List<File>): SourceParser {
+    private fun createSourceParser(classPath: List<File>, jdkHome: File?): SourceParser {
         val codebaseConfig = Codebase.Config()
         val environment =
             environmentManager.createEnvironment(
                 reporter = codebaseConfig.reporter,
                 tracer = Tracer.getStubTracer(),
                 classPath = classPath,
+                jdkHome = jdkHome,
             )
         return environment.createSourceParser(codebaseConfig)
     }
 
-    override fun getClassPathResolver(classPath: List<File>) =
-        createSourceParser(classPath).getClassPathResolver()
+    override fun getClassPathResolver(classPath: List<File>, jdkHome: File?) =
+        createSourceParser(classPath, jdkHome).getClassPathResolver()
 }

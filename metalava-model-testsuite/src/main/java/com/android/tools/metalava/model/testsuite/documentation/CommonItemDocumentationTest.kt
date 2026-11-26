@@ -1609,9 +1609,7 @@ class CommonItemDocumentationTest : BaseModelTest() {
                 """
                     package test.pkg;
 
-                    import android.annotation.SuppressLint;
-
-                    @SuppressLint("UnflaggedApi")
+                    @SuppressWarnings("UnflaggedApi")
                     /** Some comment. */
                     public class Test {}
                 """
@@ -1634,9 +1632,7 @@ class CommonItemDocumentationTest : BaseModelTest() {
                 """
                     package test.pkg;
 
-                    import android.annotation.SuppressLint;
-
-                    @SuppressLint("UnflaggedApi")
+                    @SuppressWarnings("UnflaggedApi")
                     // Inline comment
                     /** Some comment. */
                     /* Block comment. */
