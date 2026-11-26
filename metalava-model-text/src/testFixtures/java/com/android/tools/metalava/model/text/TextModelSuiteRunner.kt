@@ -25,7 +25,6 @@ import com.android.tools.metalava.model.provider.InputFormat
 import com.android.tools.metalava.model.testing.transformer.CodebaseTransformer
 import com.android.tools.metalava.model.testsuite.JarSupport
 import com.android.tools.metalava.model.testsuite.ModelSuiteRunner
-import com.android.tools.metalava.testing.getAndroidJar
 import java.io.File
 import java.net.URLClassLoader
 
@@ -54,7 +53,7 @@ class TextModelSuiteRunner : ModelSuiteRunner {
         val codebaseConfig = testFixture.codebaseConfig
 
         val signatureFiles = SignatureFile.forTest(inputs.mainSourceDir.createFiles())
-        val classPath = listOf(getAndroidJar()) + inputs.testFixture.additionalClassPath
+        val classPath = inputs.testFixture.additionalClassPath
         val resolver = ClassLoaderBasedClassPathResolver(classPath, codebaseConfig)
         val codebase =
             ApiFile.parseApi(
@@ -94,16 +93,17 @@ class TextModelSuiteRunner : ModelSuiteRunner {
  * A [ClassPathResolver] that is backed by a [URLClassLoader].
  *
  * When [resolveClass] is called this will first look in [codebase] to see if the [ClassItem] has
- * already been loaded, returning it if found. Otherwise, it will look in the [jars] to see if the
- * class exists on the classpath. If it does then it will create a [ClassItem] to represent it and
- * add it to the [codebase]. Otherwise, it will return `null`.
+ * already been loaded, returning it if found. Otherwise, it will look in the [jars] and the current
+ * JVM's boot and platform modules to see if the class exists on the classpath. If it does then it
+ * will create a [ClassItem] to represent it and add it to the [codebase]. Otherwise, it will return
+ * `null`.
  *
  * The created [ClassItem] is not a complete representation of the class that was found in the
  * [jars]. It is just a placeholder to indicate that it was found, although that may change in the
  * future.
  */
 class ClassLoaderBasedClassPathResolver(
-    jars: List<File>,
+    jars: List<File> = emptyList(),
     codebaseConfig: Codebase.Config = Codebase.Config.NOOP,
 ) : ClassPathResolver {
 

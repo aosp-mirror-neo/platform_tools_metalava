@@ -40,8 +40,8 @@ import java.net.URLClassLoader
 import java.util.jar.JarFile
 
 /**
- * A [CodebaseAssembler] that will use information from a list of jars accessed through a
- * [URLClassLoader] to populate a [Codebase].
+ * A [CodebaseAssembler] that will use information from a list of jars and the current JVM's boot
+ * and platform modules accessed through a [URLClassLoader] to populate a [Codebase].
  *
  * At the moment it only supports populating [ClassItem]s (without any members or annotations).
  */
@@ -60,10 +60,18 @@ internal class ClassLoaderBasedCodebaseAssembler(
             defaultSourceLanguage = SourceLanguage.UNKNOWN,
         )
 
+    /** The JVM platform class loader used as the parent of [classLoader]. */
+    private val platformClassLoader = ClassLoader.getPlatformClassLoader()
+
+    /**
+     * [URLClassLoader] over [jars] delegating to [platformClassLoader] so standard JDK classes
+     * (boot and platform modules) resolve without exposing unnamed application or test classpath
+     * classes.
+     */
     private val classLoader by
         lazy(LazyThreadSafetyMode.NONE) {
             val urls = jars.map { it.toURI().toURL() }.toTypedArray()
-            URLClassLoader(urls, null)
+            URLClassLoader(urls, platformClassLoader)
         }
 
     /**
@@ -87,19 +95,31 @@ internal class ClassLoaderBasedCodebaseAssembler(
     /**
      * The set of packages in [classLoader].
      *
-     * Constructed by scanning all the entries in all the jars for any `.class` files and then
-     * getting their package name and adding it and all its containing packages to the set.
+     * Constructed by combining packages from the boot and platform modules in [ModuleLayer.boot]
+     * with all `.class` file packages scanned from [jars], adding each package and all of its
+     * containing packages to the set.
      */
     private val packages by
         lazy(LazyThreadSafetyMode.NONE) {
             buildSet<String> {
-                for (jar in jars) {
-                    val jarFile = JarFile(jar)
-                    for (jarEntry in jarFile.entries()) {
-                        val path = jarEntry.name
-                        if (path.endsWith(".class")) {
-                            val packageName = path.substringBeforeLast('/').replace('/', '.')
+                // Include packages from modules visible to the platform class loader (bootstrap
+                // modules with a null class loader plus platform modules).
+                for (module in ModuleLayer.boot().modules()) {
+                    val loader = module.classLoader
+                    if (loader == null || loader === platformClassLoader) {
+                        for (packageName in module.packages) {
                             addAllPackageNames(packageName)
+                        }
+                    }
+                }
+                for (jar in jars) {
+                    JarFile(jar).use { jarFile ->
+                        for (jarEntry in jarFile.entries()) {
+                            val path = jarEntry.name
+                            if (path.endsWith(".class")) {
+                                val packageName = path.substringBeforeLast('/').replace('/', '.')
+                                addAllPackageNames(packageName)
+                            }
                         }
                     }
                 }
@@ -143,7 +163,22 @@ internal class ClassLoaderBasedCodebaseAssembler(
         var binaryName = qualifiedName
         do {
             try {
-                return classLoader.loadClass(binaryName)
+                val cls = classLoader.loadClass(binaryName)
+                val definingLoader = cls.classLoader
+
+                // In OpenJDK, PlatformClassLoader shares BuiltinClassLoader's static module map
+                // with AppClassLoader and delegates named AppClassLoader modules (e.g.
+                // jdk.compiler or --module-path modules) to it. Enforce the same loader boundary
+                // as [packages] so resolveClass and resolvePackage stay consistent.
+                return if (
+                    definingLoader == null ||
+                        definingLoader === platformClassLoader ||
+                        definingLoader === classLoader
+                ) {
+                    cls
+                } else {
+                    null
+                }
             } catch (e: ClassNotFoundException) {
                 // If the class could not be found then maybe it was a nested class so replace the
                 // last '.' in the name with a $ and try again. If there is no '.' then return.
@@ -189,7 +224,7 @@ internal class ClassLoaderBasedCodebaseAssembler(
             jars: List<File>,
             codebaseConfig: Codebase.Config
         ): ClassLoaderBasedCodebaseAssembler {
-            val location = jars.first()
+            val location = jars.firstOrNull() ?: File(System.getProperty("java.home"))
 
             val assembler =
                 ClassLoaderBasedCodebaseAssembler(

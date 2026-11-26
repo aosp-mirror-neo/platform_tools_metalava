@@ -31,7 +31,6 @@ import com.android.tools.metalava.model.testOrTrue
 import com.android.tools.metalava.model.testing.value.literalValue
 import com.android.tools.metalava.model.visitors.ApiFiltersVisitor
 import com.android.tools.metalava.model.visitors.ApiType
-import com.android.tools.metalava.testing.getAndroidJar
 import com.google.common.truth.Truth.assertThat
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -715,7 +714,7 @@ class ApiFileTest : BaseTextCodebaseTest() {
             Codebase.Config(
                 apiSurfaces = apiSurfaces,
             )
-        val classPathResolver = ClassLoaderBasedClassPathResolver(listOf(getAndroidJar()))
+        val classPathResolver = ClassLoaderBasedClassPathResolver()
         val codebase =
             ApiFile.parseApi(
                 signatureFiles,

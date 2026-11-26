@@ -16,15 +16,15 @@
 
 package com.android.tools.metalava.model.text
 
-import com.android.tools.metalava.testing.getAndroidJar
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import org.junit.Test
 
 class ClassLoaderBasedClassResolverTest {
 
     private fun checkClassResolved(qualifiedName: String) {
-        val resolver = ClassLoaderBasedClassPathResolver(listOf(getAndroidJar()))
+        val resolver = ClassLoaderBasedClassPathResolver()
         val classItem = resolver.resolveClass(qualifiedName)
         assertNotNull(classItem)
         assertEquals(qualifiedName, classItem.qualifiedName())
@@ -38,5 +38,21 @@ class ClassLoaderBasedClassResolverTest {
     @Test
     fun `Test inner class`() {
         checkClassResolved("java.util.Map.Entry")
+    }
+
+    @Test
+    fun `Test package`() {
+        val resolver = ClassLoaderBasedClassPathResolver()
+        val pkgItem = resolver.resolvePackage("java.lang")
+        assertNotNull(pkgItem)
+        assertEquals("java.lang", pkgItem.qualifiedName())
+    }
+
+    @Test
+    fun `Test app class loader module is not resolved`() {
+        val resolver = ClassLoaderBasedClassPathResolver()
+        assertNull(resolver.resolvePackage("com.sun.source.tree"))
+        assertNull(resolver.resolveClass("com.sun.source.tree.Tree"))
+        assertNull(resolver.resolvePackage("com.sun.source.tree"))
     }
 }
