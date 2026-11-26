@@ -90,6 +90,7 @@ class ConstructorClassFileInfoTest {
 
         val ctor = LocalWithCapture::class.java.declaredConstructors.single()
         val info = ConstructorClassFileInfo.of(ctor)
+
         // The synthetic captured variable parameter is skipped; declared parameters align properly.
         val declaredNames = info.parameterNames.filterNotNull()
         val declaredNullability =
@@ -98,6 +99,11 @@ class ConstructorClassFileInfoTest {
                 .map { info.parameterNullability[it] }
         assertEquals(listOf("first", "second"), declaredNames)
         assertEquals(listOf(false, true), declaredNullability)
+
+        // The LocalVariableTable fallback must also keep the synthetic captured parameter null.
+        val fromLocalVars = ConstructorClassFileInfo.of(ctor, forceClassFileNames = true)
+        assertEquals(info.parameterNames.toList(), fromLocalVars.parameterNames.toList())
+        assertEquals(1, fromLocalVars.parameterNames.count { it == null })
     }
 
     @Suppress("unused")
@@ -111,6 +117,14 @@ class ConstructorClassFileInfoTest {
     fun `Test Kotlin parameter nullability from classfile`() {
         val ctor = MixedSlotTypes::class.java.declaredConstructors.single()
         val info = ConstructorClassFileInfo.of(ctor)
+        assertEquals(listOf("count", "label", "flag"), info.parameterNames.toList())
+        assertEquals(listOf(false, true, false), info.parameterNullability.toList())
+    }
+
+    @Test
+    fun `Test parameter names fallback to LocalVariableTable`() {
+        val ctor = MixedSlotTypes::class.java.declaredConstructors.single()
+        val info = ConstructorClassFileInfo.of(ctor, forceClassFileNames = true)
         assertEquals(listOf("count", "label", "flag"), info.parameterNames.toList())
         assertEquals(listOf(false, true, false), info.parameterNullability.toList())
     }
@@ -149,8 +163,11 @@ class ConstructorClassFileInfoTest {
     @Test
     fun `Test inner class outer receiver parameter has null name`() {
         val ctor = InnerWithParam::class.java.declaredConstructors.single()
-        val info = ConstructorClassFileInfo.of(ctor)
-        assertEquals(listOf(null, "name"), info.parameterNames.toList())
-        assertEquals(listOf(false, true), info.parameterNullability.toList())
+        val fromMethodParams = ConstructorClassFileInfo.of(ctor)
+        assertEquals(listOf(null, "name"), fromMethodParams.parameterNames.toList())
+        assertEquals(listOf(false, true), fromMethodParams.parameterNullability.toList())
+
+        val fromLocalVars = ConstructorClassFileInfo.of(ctor, forceClassFileNames = true)
+        assertEquals(listOf(null, "name"), fromLocalVars.parameterNames.toList())
     }
 }

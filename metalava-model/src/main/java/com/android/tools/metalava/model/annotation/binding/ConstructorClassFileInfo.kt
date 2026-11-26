@@ -84,9 +84,15 @@ internal class ConstructorClassFileInfo(
             append(")V")
         }
 
-        /** Extract [ConstructorClassFileInfo] for [constructor]. */
+        /**
+         * Extract [ConstructorClassFileInfo] for [constructor].
+         *
+         * @param forceClassFileNames when `true` (for testing), ignores `MethodParameters` and
+         *   reads parameter names from `LocalVariableTable`.
+         */
         fun of(
             constructor: Constructor<*>,
+            forceClassFileNames: Boolean = false,
         ): ConstructorClassFileInfo {
             val declaringClass = constructor.declaringClass
             val paramTypes = constructor.parameterTypes
@@ -108,6 +114,8 @@ internal class ConstructorClassFileInfo(
             // align annotations on local/anonymous classes whose synthetic parameters are omitted
             // from `RuntimeVisibleParameterAnnotations`.
             val parameterAnnotations = constructor.parameterAnnotations
+            val needLocalVarName = BooleanArray(count)
+            var hasMissingNames = false
             var declaredIndex = 0
             for (i in 0 until count) {
                 val p = parameters[i]
@@ -115,8 +123,11 @@ internal class ConstructorClassFileInfo(
                     continue
                 }
                 val currentDeclaredIndex = declaredIndex++
-                if (p.isNamePresent) {
+                if (!forceClassFileNames && p.isNamePresent) {
                     names[i] = p.name
+                } else {
+                    needLocalVarName[i] = true
+                    hasMissingNames = true
                 }
 
                 if (!paramTypes[i].isPrimitive) {
@@ -148,10 +159,17 @@ internal class ConstructorClassFileInfo(
                     !declaringClass.isAnonymousClass &&
                     paramTypes.any { !it.isPrimitive }
 
-            if (needInvisibleNullability) {
-                readInvisibleNullabilityFromClassFile(constructor, nullable)
+            if (!needInvisibleNullability && !hasMissingNames) {
+                return ConstructorClassFileInfo(names, nullable)
             }
 
+            readFromClassFile(
+                constructor = constructor,
+                needInvisibleNullability = needInvisibleNullability,
+                needLocalVarName = if (hasMissingNames) needLocalVarName else null,
+                names = names,
+                nullable = nullable,
+            )
             return ConstructorClassFileInfo(names, nullable)
         }
 
@@ -272,29 +290,45 @@ internal class ConstructorClassFileInfo(
         }
 
         /**
-         * Read `RuntimeInvisibleParameterAnnotations` for [constructor] from its `.class` resource
-         * stream (JVMS §4.1–4.7).
+         * Read `RuntimeInvisibleParameterAnnotations` and/or `LocalVariableTable` for [constructor]
+         * from its `.class` resource stream (JVMS §4.1–4.7).
          */
-        private fun readInvisibleNullabilityFromClassFile(
+        private fun readFromClassFile(
             constructor: Constructor<*>,
+            needInvisibleNullability: Boolean,
+            needLocalVarName: BooleanArray?,
+            names: Array<String?>,
             nullable: BooleanArray,
         ) {
             val targetDescriptor = constructor.jvmDescriptor()
-            val count = constructor.parameterCount
+            val paramTypes = constructor.parameterTypes
+            val count = paramTypes.size
 
             scanClassFileConstructors(
                 declaringClass = constructor.declaringClass,
                 onConstructorAttribute = { _, descriptor, attrName, attrLen, input, utf8 ->
-                    if (
-                        descriptor == targetDescriptor &&
-                            attrName == "RuntimeInvisibleParameterAnnotations"
-                    ) {
-                        val bytes = ByteArray(attrLen)
-                        input.readFully(bytes)
-                        parseInvisibleParameterAnnotations(bytes, utf8, count, nullable)
-                        true
-                    } else {
-                        false
+                    when {
+                        descriptor != targetDescriptor -> false
+                        needInvisibleNullability &&
+                            attrName == "RuntimeInvisibleParameterAnnotations" -> {
+                            val bytes = ByteArray(attrLen)
+                            input.readFully(bytes)
+                            parseInvisibleParameterAnnotations(bytes, utf8, count, nullable)
+                            true
+                        }
+                        needLocalVarName != null && attrName == "Code" -> {
+                            val bytes = ByteArray(attrLen)
+                            input.readFully(bytes)
+                            parseParameterNamesFromCode(
+                                bytes = bytes,
+                                utf8 = utf8,
+                                paramTypes = paramTypes,
+                                needLocalVarName = needLocalVarName,
+                                names = names,
+                            )
+                            true
+                        }
+                        else -> false
                     }
                 },
                 onConstructorComplete = { _, descriptor -> descriptor == targetDescriptor },
@@ -323,6 +357,70 @@ internal class ConstructorClassFileInfo(
                         input.skipBytesFully(2)
                         input.skipElementValue()
                     }
+                }
+            }
+        }
+
+        /**
+         * Fallback that extracts constructor parameter names from `LocalVariableTable` inside a
+         * `Code` attribute (JVMS §4.7.3, §4.7.13) when classes were compiled without
+         * `-java-parameters`.
+         */
+        private fun parseParameterNamesFromCode(
+            bytes: ByteArray,
+            utf8: Array<String?>,
+            paramTypes: Array<Class<*>>,
+            needLocalVarName: BooleanArray,
+            names: Array<String?>,
+        ) {
+            val input = DataInputStream(ByteArrayInputStream(bytes))
+            input.skipBytesFully(4) // max_stack, max_locals
+            val codeLength = input.readInt()
+            input.skipBytesFully(codeLength)
+            val exceptionTableLength = input.readUnsignedShort()
+            input.skipBytesFully(exceptionTableLength * 8)
+
+            // Map each requested parameter index to its local variable slot (slot 0 is `this`).
+            val paramCount = paramTypes.size
+            val slotToParamIndex = HashMap<Int, Int>(paramCount * 2)
+            var slot = 1
+            for (i in 0 until paramCount) {
+                if (needLocalVarName[i]) {
+                    slotToParamIndex[slot] = i
+                }
+                slot +=
+                    if (
+                        paramTypes[i] == Long::class.javaPrimitiveType ||
+                            paramTypes[i] == Double::class.javaPrimitiveType
+                    ) {
+                        2
+                    } else {
+                        1
+                    }
+            }
+
+            val codeAttrsCount = input.readUnsignedShort()
+            repeat(codeAttrsCount) {
+                val attrName = utf8[input.readUnsignedShort()]
+                val attrLen = input.readInt()
+                if (attrName == "LocalVariableTable") {
+                    val tableLen = input.readUnsignedShort()
+                    repeat(tableLen) {
+                        val startPc = input.readUnsignedShort()
+                        input.skipBytesFully(2) // length
+                        val nameIdx = input.readUnsignedShort()
+                        input.skipBytesFully(2) // descriptor_index
+                        val slotIdx = input.readUnsignedShort()
+                        if (startPc == 0) {
+                            val paramIdx = slotToParamIndex[slotIdx]
+                            if (paramIdx != null && names[paramIdx] == null) {
+                                names[paramIdx] = utf8[nameIdx]
+                            }
+                        }
+                    }
+                    return
+                } else {
+                    input.skipBytesFully(attrLen)
                 }
             }
         }
