@@ -261,8 +261,7 @@ class Driver(
      * created allows it to be reused for the same reason.
      */
     private val classPathResolver: ClassPathResolver? by lazy {
-        val classpath = sourceOptions.classpath
-        if (classpath.isNotEmpty()) {
+        if (sourceOptions.classpath.isNotEmpty() || sourceOptions.jdkHome != null) {
             sourceParser.getClassPathResolver()
         } else {
             null

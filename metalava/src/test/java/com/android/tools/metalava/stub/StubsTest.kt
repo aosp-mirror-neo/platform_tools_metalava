@@ -1232,9 +1232,6 @@ class StubsTest : AbstractStubsTest() {
                 ),
             expectedStubFiles =
                 arrayOf(
-                    // TODO(b/590777589): Driver.classPathResolver is not created when --jdk-home is
-                    //  passed without --classpath, so AttributedCharacterIterator.Attribute is not
-                    //  resolved and the required `super("");` call is omitted.
                     java(
                         """
                             package java.text;
@@ -1242,7 +1239,7 @@ class StubsTest : AbstractStubsTest() {
                             public abstract class Format implements java.lang.Cloneable, java.io.Serializable {
                             protected Format() { throw new RuntimeException("Stub!"); }
                             public static class Field extends java.text.AttributedCharacterIterator.Attribute {
-                            protected Field(java.lang.String arg1) { throw new RuntimeException("Stub!"); }
+                            protected Field(java.lang.String arg1) { super(""); throw new RuntimeException("Stub!"); }
                             }
                             }
                         """
