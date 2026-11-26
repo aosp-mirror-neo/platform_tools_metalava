@@ -329,6 +329,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Test Parcelable`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -721,6 +722,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check intent builder names`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -753,6 +755,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check helper classes`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -903,6 +906,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Make sure helper classes that end with a just Compat suffix are flagged`() {
         check(
+            includeAndroidJar = true,
             extraArguments =
                 hiddenIssues(
                     Issues.FORBIDDEN_SUPER_CLASS,
@@ -1028,6 +1032,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Raw AIDL`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -1475,6 +1480,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check context first`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -1519,6 +1525,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check context first for suspend fun`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -1547,6 +1554,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check context first for function with context parameters`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             // TODO(b/512120881): there should not be an error for the `okCallExtension`
             expectedIssues =
@@ -1576,6 +1584,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check listener last`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             extraArguments =
                 hiddenIssues(
@@ -1817,6 +1826,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check files`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -1851,6 +1861,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check parcelable lists`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -1885,6 +1896,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check abstract inner`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -2263,6 +2275,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check user handle names`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -2467,6 +2480,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check using parcel file descriptors`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """
@@ -2590,6 +2604,7 @@ class ApiLintTest : DriverTest() {
     @Test
     fun `Check forbidden super-classes`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """

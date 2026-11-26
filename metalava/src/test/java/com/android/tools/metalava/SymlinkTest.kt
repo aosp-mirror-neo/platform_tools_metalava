@@ -16,6 +16,7 @@
 
 package com.android.tools.metalava
 
+import com.android.tools.metalava.testing.KnownJarFiles
 import com.android.tools.metalava.testing.java
 import java.io.File
 import org.junit.Test
@@ -29,6 +30,7 @@ class SymlinkTest : DriverTest() {
         //     (a) don't recurse forever and (b) we emit a warning
         //     that symlink targets are ignored, and
         check(
+            classpath = arrayOf(KnownJarFiles.stubAnnotationsTestFile),
             expectedIssues =
                 "src/test/pkg/sub1/sub2/sub3: info: Ignoring symlink during source file discovery directory traversal [IgnoringSymlink]",
             projectSetup = { dir ->

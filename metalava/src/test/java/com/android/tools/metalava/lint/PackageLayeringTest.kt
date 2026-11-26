@@ -27,6 +27,7 @@ class PackageLayeringTest : DriverTest() {
     @Test
     fun `Check package layering`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             // Ignore other issues.
             extraArguments =

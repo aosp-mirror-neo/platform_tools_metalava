@@ -82,7 +82,7 @@ fun TemporaryFolderOwner.testSources(
     classpath: Array<TestFile>?,
     signatureSources: Array<String>,
     skipSourceArgs: Boolean,
-    includeAndroidJar: Boolean = true,
+    includeAndroidJar: Boolean = false,
     includeDefaultJdkHome: Boolean = true,
 ): TestSourceOptions {
     val projectDir = createProjectDir(sourceFiles)

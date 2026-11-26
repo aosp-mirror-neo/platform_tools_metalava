@@ -232,6 +232,7 @@ class SdkFileWriterTest : DriverTest() {
     @Test
     fun `Test generating widgets`() {
         check(
+            includeAndroidJar = true,
             apiSurface = KnownApiSurface.PUBLIC,
             sourceFiles =
                 arrayOf(

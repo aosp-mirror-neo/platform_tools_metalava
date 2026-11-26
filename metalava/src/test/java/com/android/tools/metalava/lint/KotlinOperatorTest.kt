@@ -71,6 +71,7 @@ class KotlinOperatorTest : DriverTest() {
     @Test
     fun `KotlinOperator check only applies when not using operator modifier`() {
         check(
+            includeAndroidJar = true,
             apiLint = "", // enabled
             expectedIssues =
                 """

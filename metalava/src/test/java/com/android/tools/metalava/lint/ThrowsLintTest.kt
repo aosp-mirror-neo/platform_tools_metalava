@@ -27,6 +27,7 @@ class ThrowsLintTest : DriverTest() {
     @Test
     fun `Check exception related issues`() {
         check(
+            includeAndroidJar = true,
             extraArguments =
                 arrayOf(
                     ARG_API_LINT,

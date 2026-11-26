@@ -229,6 +229,7 @@ class DocApiHistoryTest : DriverTest() {
     @Test
     fun `Merge deprecation levels`() {
         check(
+            includeAndroidJar = true,
             sourceFiles =
                 arrayOf(
                     java(

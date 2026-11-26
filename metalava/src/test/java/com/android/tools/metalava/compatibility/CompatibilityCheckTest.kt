@@ -1683,6 +1683,7 @@ class CompatibilityCheckTest : DriverTest() {
     @Test
     fun `Test Kotlin extensions`() {
         check(
+            includeAndroidJar = true,
             format = FileFormat.V4,
             expectedIssues = "",
             checkCompatibilityApiReleased =
@@ -2896,6 +2897,7 @@ class CompatibilityCheckTest : DriverTest() {
     @Test
     fun `Implementing undefined interface`() {
         check(
+            includeAndroidJar = true,
             checkCompatibilityApiReleased =
                 """
                 package org.apache.http.conn.scheme {
@@ -3012,6 +3014,7 @@ class CompatibilityCheckTest : DriverTest() {
         // Makes sure we properly handle conflicting definitions of a java file in separate source
         // roots
         check(
+            includeAndroidJar = true,
             expectedIssues = "",
             checkCompatibilityApiReleased =
                 """
@@ -3075,6 +3078,7 @@ class CompatibilityCheckTest : DriverTest() {
     fun `Check parameterized return type nullability`() {
         // Regression test for 130567941
         check(
+            includeAndroidJar = true,
             expectedIssues = "",
             checkCompatibilityApiReleased =
                 """

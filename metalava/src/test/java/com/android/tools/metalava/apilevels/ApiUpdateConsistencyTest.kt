@@ -26,9 +26,9 @@ import com.android.tools.metalava.model.snapshot.EmittableDelegatingVisitor
 import com.android.tools.metalava.model.source.EnvironmentManager
 import com.android.tools.metalava.model.source.SourceSet
 import com.android.tools.metalava.reporter.ThrowingReporter
-import com.android.tools.metalava.testing.getAndroidJar
 import com.android.tools.metalava.testing.java
 import com.android.tools.metalava.testing.signature
+import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import kotlin.test.assertEquals
@@ -94,17 +94,12 @@ class ApiUpdateConsistencyTest : DriverTest() {
                     ThrowingReporter.INSTANCE,
                     sourceFiles.map { it.createFile(temporaryFolder.newFolder()) },
                 )
-            val classPath =
-                listOf(
-                    getAndroidJar(),
-                )
-
             val environment =
                 environmentManager.createEnvironment(
                     reporter = ThrowingReporter.INSTANCE,
                     tracer = Tracer.getStubTracer(),
                     sourceSet = sourceSet,
-                    classPath = classPath,
+                    jdkHome = File(System.getProperty("java.home")),
                 )
             val parser = environment.createSourceParser(Codebase.Config.NOOP)
 

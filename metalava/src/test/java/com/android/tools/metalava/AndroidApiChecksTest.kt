@@ -204,9 +204,9 @@ class AndroidApiChecksTest : DriverTest() {
         check(
             expectedIssues =
                 """
-                src/android/pkg/IntentActionTest.java:19: error: Field 'FOO_BAR_ERROR_ACTION' is missing @BroadcastBehavior [BroadcastBehavior]
-                src/android/pkg/IntentActionTest.java:19: error: Field 'FOO_BAR_ERROR_ACTION' is missing @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION) [SdkConstant]
-                src/android/pkg/IntentActionTest.java:30: error: Field 'BAR_FOO_ERROR_ACTION' is missing @SdkConstant(SdkConstantType.ACTIVITY_INTENT_ACTION) [SdkConstant]
+                src/android/pkg/IntentActionTest.java:18: error: Field 'FOO_BAR_ERROR_ACTION' is missing @BroadcastBehavior [BroadcastBehavior]
+                src/android/pkg/IntentActionTest.java:18: error: Field 'FOO_BAR_ERROR_ACTION' is missing @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION) [SdkConstant]
+                src/android/pkg/IntentActionTest.java:29: error: Field 'BAR_FOO_ERROR_ACTION' is missing @SdkConstant(SdkConstantType.ACTIVITY_INTENT_ACTION) [SdkConstant]
                 """,
             sourceFiles =
                 arrayOf(
@@ -214,7 +214,6 @@ class AndroidApiChecksTest : DriverTest() {
                         """
                     package android.pkg;
 
-                    import android.Manifest;
                     import android.annotation.SdkConstant;
                     import android.annotation.SdkConstant.SdkConstantType;
                     import android.annotation.BroadcastBehavior;

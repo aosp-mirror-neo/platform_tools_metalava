@@ -376,7 +376,7 @@ abstract class DriverTest :
          * Whether to include `android.jar` on the classpath instead of using `--jdk-home` from the
          * current JVM.
          */
-        includeAndroidJar: Boolean = true,
+        includeAndroidJar: Boolean = false,
         /** The API signature content (corresponds to --api) */
         @Language("TEXT") expectedApiSignature: String? = null,
         /** The removed API (corresponds to --removed-api) */

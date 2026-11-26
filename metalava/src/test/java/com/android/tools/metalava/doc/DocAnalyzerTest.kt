@@ -163,6 +163,7 @@ class DocAnalyzerTest : DriverTest() {
     @Test
     fun `Document Permissions`() {
         check(
+            includeAndroidJar = true,
             docStubs = true,
             sourceFiles =
                 arrayOf(
@@ -1004,6 +1005,7 @@ class DocAnalyzerTest : DriverTest() {
     fun `Test Column annotation`() {
         // Bug: 120429729
         check(
+            includeAndroidJar = true,
             sourceFiles =
                 arrayOf(
                     java(
@@ -1075,6 +1077,7 @@ class DocAnalyzerTest : DriverTest() {
     @Test
     fun `Test Column annotation with hidden ContentProvider`() {
         check(
+            includeAndroidJar = true,
             sourceFiles =
                 arrayOf(
                     java(

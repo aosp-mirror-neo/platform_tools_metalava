@@ -1172,6 +1172,7 @@ class StubsTest : AbstractStubsTest() {
     @Test
     fun `Compilable stubs are not generated when inheriting class exists in jar passed via classpath`() {
         check(
+            includeAndroidJar = true,
             format = FileFormat.V2,
             signatureSources =
                 arrayOf(
@@ -1214,7 +1215,6 @@ class StubsTest : AbstractStubsTest() {
     @Test
     fun `Compilable stubs when inheriting class exists in jdk-home`() {
         check(
-            includeAndroidJar = false,
             format = FileFormat.V2,
             signatureSources =
                 arrayOf(

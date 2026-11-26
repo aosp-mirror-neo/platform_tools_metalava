@@ -24,6 +24,7 @@ import com.android.tools.metalava.model.provider.Capability
 import com.android.tools.metalava.model.testing.RequiresCapabilities
 import com.android.tools.metalava.nonNullSource
 import com.android.tools.metalava.reporter.Issues
+import com.android.tools.metalava.suppressLintSource
 import com.android.tools.metalava.testing.KnownSourceFiles
 import com.android.tools.metalava.testing.java
 import com.android.tools.metalava.testing.kotlin
@@ -212,7 +213,8 @@ class NullabilityLintTest : DriverTest() {
                     """
                     ),
                     KnownSourceFiles.androidxNullableJavaSource,
-                    KnownSourceFiles.androidxNonNullJavaSource
+                    KnownSourceFiles.androidxNonNullJavaSource,
+                    suppressLintSource,
                 )
         )
     }
@@ -551,6 +553,7 @@ class NullabilityLintTest : DriverTest() {
     @Test
     fun `Nullability overrides in unbounded generics - Object to generic and back`() {
         check(
+            includeAndroidJar = true,
             apiLint = "",
             expectedIssues =
                 "src/test/pkg/ArrayMap.java:11: error: Invalid nullability on type java.lang.Object in parameter `key` in method `get`. Parameter in method override cannot use a non-null type when the corresponding type from the super method is nullable. [InvalidNullabilityOverride]",

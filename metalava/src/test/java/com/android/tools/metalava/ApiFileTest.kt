@@ -1401,6 +1401,7 @@ class ApiFileTest : DriverTest() {
     fun JvmOverloads() {
         // Regression test for https://github.com/android/android-ktx/issues/366
         check(
+            includeAndroidJar = true,
             format = FileFormat.V4,
             sourceFiles =
                 arrayOf(
@@ -3878,6 +3879,7 @@ class ApiFileTest : DriverTest() {
     @Test
     fun `v4 format for qualified references in types`() {
         check(
+            includeAndroidJar = true,
             format = FileFormat.V4,
             sourceFiles =
                 arrayOf(
@@ -4643,6 +4645,7 @@ class ApiFileTest : DriverTest() {
     fun `Default Values and Names in Kotlin`() {
         // Kotlin code which explicitly specifies parameter names
         check(
+            includeAndroidJar = true,
             format = FileFormat.V4,
             sourceFiles =
                 arrayOf(
@@ -4716,6 +4719,7 @@ class ApiFileTest : DriverTest() {
         // Testing trickier default values; regression test for problem
         // observed in androidx.core.util with LruCache
         check(
+            includeAndroidJar = true,
             format = FileFormat.V4,
             sourceFiles =
                 arrayOf(

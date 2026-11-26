@@ -33,7 +33,6 @@ class DocAnalyzerRangeTest : DriverTest() {
                         """
                     package test.pkg;
 
-                    import android.Manifest;
                     import android.annotation.IntRange;
 
                     public class RangeTest {
