@@ -1212,6 +1212,46 @@ class StubsTest : AbstractStubsTest() {
     }
 
     @Test
+    fun `Compilable stubs when inheriting class exists in jdk-home`() {
+        check(
+            includeAndroidJar = false,
+            format = FileFormat.V2,
+            signatureSources =
+                arrayOf(
+                    """
+                        // Signature format: 2.0
+                        package java.text {
+                          public abstract class Format implements java.lang.Cloneable java.io.Serializable {
+                            ctor protected Format();
+                          }
+                          public static class Format.Field extends java.text.AttributedCharacterIterator.Attribute {
+                            ctor protected Format.Field(String);
+                          }
+                        }
+                    """,
+                ),
+            expectedStubFiles =
+                arrayOf(
+                    // TODO(b/590777589): Driver.classPathResolver is not created when --jdk-home is
+                    //  passed without --classpath, so AttributedCharacterIterator.Attribute is not
+                    //  resolved and the required `super("");` call is omitted.
+                    java(
+                        """
+                            package java.text;
+                            @SuppressWarnings({"unchecked", "deprecation", "all"})
+                            public abstract class Format implements java.lang.Cloneable, java.io.Serializable {
+                            protected Format() { throw new RuntimeException("Stub!"); }
+                            public static class Field extends java.text.AttributedCharacterIterator.Attribute {
+                            protected Field(java.lang.String arg1) { throw new RuntimeException("Stub!"); }
+                            }
+                            }
+                        """
+                    ),
+                ),
+        )
+    }
+
+    @Test
     fun `Type-use annotations are not included in stubs`() {
         check(
             sourceFiles =
