@@ -39,6 +39,7 @@ internal class ConstructorClassFileInfo(
 ) {
     companion object {
         private const val CLASS_FILE_MAGIC = 0xCAFEBABE.toInt()
+        private const val ACC_SYNTHETIC = 0x1000
         private const val KOTLIN_NULLABLE_DESCRIPTOR = "Lorg/jetbrains/annotations/Nullable;"
 
         // JVMS §4.4 Table 4.4-A constant pool tags.
@@ -171,6 +172,70 @@ internal class ConstructorClassFileInfo(
                 nullable = nullable,
             )
             return ConstructorClassFileInfo(names, nullable)
+        }
+
+        /**
+         * Find JVM descriptors of non-synthetic `<init>` constructors in [declaringClass] whose
+         * `Code` attribute has no `LineNumberTable`.
+         *
+         * `kotlinc` omits `LineNumberTable` on compiler-generated convenience forwarding
+         * constructors (the no-arg `()V` constructor generated when all primary constructor
+         * parameters have defaults, and `@JvmOverloads` telescopic overloads), whereas
+         * source-declared constructors include a `LineNumberTable`.
+         */
+        internal fun findGeneratedForwardingConstructors(declaringClass: Class<*>): Set<String> {
+            val forwarding = HashSet<String>()
+            var sawCode = false
+            var hasLineNumberTable = false
+
+            scanClassFileConstructors(
+                declaringClass = declaringClass,
+                onConstructorAttribute = { accessFlags, _, attrName, attrLen, input, utf8 ->
+                    if ((accessFlags and ACC_SYNTHETIC) == 0 && attrName == "Code") {
+                        sawCode = true
+                        val bytes = ByteArray(attrLen)
+                        input.readFully(bytes)
+                        hasLineNumberTable = codeHasLineNumberTable(bytes, utf8)
+                        true
+                    } else {
+                        false
+                    }
+                },
+                onConstructorComplete = { accessFlags, descriptor ->
+                    if ((accessFlags and ACC_SYNTHETIC) == 0 && sawCode && !hasLineNumberTable) {
+                        forwarding.add(descriptor)
+                    }
+                    sawCode = false
+                    hasLineNumberTable = false
+                    false
+                },
+            )
+
+            return forwarding
+        }
+
+        /** Return `true` if the `Code` attribute [bytes] contain a `LineNumberTable` attribute. */
+        private fun codeHasLineNumberTable(
+            bytes: ByteArray,
+            utf8: Array<String?>,
+        ): Boolean {
+            val input = DataInputStream(ByteArrayInputStream(bytes))
+            input.skipBytesFully(4) // max_stack, max_locals
+            val codeLength = input.readInt()
+            input.skipBytesFully(codeLength)
+            val exceptionTableLength = input.readUnsignedShort()
+            input.skipBytesFully(exceptionTableLength * 8)
+
+            val codeAttrsCount = input.readUnsignedShort()
+            repeat(codeAttrsCount) {
+                val attrName = utf8[input.readUnsignedShort()]
+                val attrLen = input.readInt()
+                if (attrName == "LineNumberTable") {
+                    return true
+                }
+                input.skipBytesFully(attrLen)
+            }
+            return false
         }
 
         /**
