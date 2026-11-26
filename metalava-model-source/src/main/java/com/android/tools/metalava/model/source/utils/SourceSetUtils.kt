@@ -16,7 +16,6 @@
 
 package com.android.tools.metalava.model.source.utils
 
-import com.android.tools.lint.checks.infrastructure.ClassName
 import java.io.File
 
 const val PACKAGE_HTML = "package.html"

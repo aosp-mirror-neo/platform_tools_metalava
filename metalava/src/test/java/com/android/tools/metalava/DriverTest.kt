@@ -18,11 +18,9 @@ package com.android.tools.metalava
 
 import com.android.SdkConstants.DOT_TXT
 import com.android.tools.lint.LintCliClient
-import com.android.tools.lint.checks.infrastructure.ClassName
 import com.android.tools.lint.checks.infrastructure.TestFile
 import com.android.tools.lint.checks.infrastructure.TestFiles.java
 import com.android.tools.lint.checks.infrastructure.TestFiles.kotlin
-import com.android.tools.lint.checks.infrastructure.stripComments
 import com.android.tools.lint.client.api.LintClient
 import com.android.tools.metalava.cli.common.ARG_ERROR
 import com.android.tools.metalava.cli.common.ARG_HIDE
@@ -68,7 +66,9 @@ import com.android.tools.metalava.model.api.surface.ApiVariantType
 import com.android.tools.metalava.model.provider.Capability
 import com.android.tools.metalava.model.source.SourceModelProvider
 import com.android.tools.metalava.model.source.SourceSet
+import com.android.tools.metalava.model.source.utils.ClassName
 import com.android.tools.metalava.model.source.utils.DOT_KT
+import com.android.tools.metalava.model.source.utils.stripComments
 import com.android.tools.metalava.model.testing.CodebaseCreatorConfig
 import com.android.tools.metalava.model.testing.CodebaseCreatorConfigAware
 import com.android.tools.metalava.model.text.ApiFile

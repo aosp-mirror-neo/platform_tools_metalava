@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-package com.android.tools.lint.checks.infrastructure
+package com.android.tools.metalava.model.source.utils
 
-import com.android.tools.metalava.model.source.utils.DOT_JAVA
-import com.android.tools.metalava.model.source.utils.DOT_KT
 import java.util.regex.Pattern
 
 // Copy in metalava from lint to avoid compilation dependency directly on lint-tests
@@ -160,7 +158,7 @@ private val CLASS_PATTERN =
 fun getPackage(source: String): String? {
     val matcher = PACKAGE_PATTERN.matcher(source)
     return if (matcher.find()) {
-        matcher.group(1).trim { it <= ' ' }
+        matcher.group(1).trim()
     } else {
         null
     }
@@ -176,7 +174,7 @@ fun getClassName(source: String): String? {
         // Make sure this "class" reference isn't part of an annotation on the class
         // referencing a class literal -- Foo.class, or in Kotlin, Foo::class.java)
         if (groupStart == 0 || source[groupStart - 1] != '.' && source[groupStart - 1] != ':') {
-            val trimmed = cls.trim { it <= ' ' }
+            val trimmed = cls.trim()
             val typeParameter = trimmed.indexOf('<')
             return if (typeParameter != -1) {
                 trimmed.substring(0, typeParameter)
