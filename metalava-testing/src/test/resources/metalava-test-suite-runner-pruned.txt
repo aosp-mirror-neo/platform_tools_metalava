@@ -1,0 +1,5 @@
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$ConcreteSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$EmptyParentRunnerSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$NestedEmptyParentRunnerSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$PartiallyEmptyParentRunnerSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$IgnoredSample

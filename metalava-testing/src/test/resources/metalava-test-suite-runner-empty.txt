@@ -1,0 +1,3 @@
+# Only comments and non-runnable classes
+com.android.tools.metalava.testing.DoesNotExistAtAll
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$HelperSample

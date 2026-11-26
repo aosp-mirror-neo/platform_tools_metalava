@@ -1,0 +1,14 @@
+# Sample candidate class list for MetalavaTestSuiteRunnerTest
+
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$ConcreteSample
+# Duplicate entry should only run once
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$ConcreteSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$InheritedTestSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$RunWithSample
+
+# Non-runnable entries that should be skipped
+com.android.tools.metalava.testing.DoesNotExistAtAll
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$InterfaceSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$AbstractSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$InnerSample
+com.android.tools.metalava.testing.MetalavaTestSuiteRunnerTest$HelperSample
