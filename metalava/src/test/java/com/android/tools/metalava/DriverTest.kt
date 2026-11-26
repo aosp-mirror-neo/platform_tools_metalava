@@ -25,11 +25,13 @@ import com.android.tools.lint.client.api.LintClient
 import com.android.tools.metalava.cli.common.ARG_ERROR
 import com.android.tools.metalava.cli.common.ARG_HIDE
 import com.android.tools.metalava.cli.common.ARG_JAVA_SOURCE
+import com.android.tools.metalava.cli.common.ARG_JDK_HOME
 import com.android.tools.metalava.cli.common.ARG_MERGE_INCLUSION_ANNOTATIONS
 import com.android.tools.metalava.cli.common.ARG_MERGE_QUALIFIER_ANNOTATIONS
 import com.android.tools.metalava.cli.common.ARG_NO_COLOR
 import com.android.tools.metalava.cli.common.ARG_QUIET
 import com.android.tools.metalava.cli.common.ARG_REPEAT_ERRORS_MAX
+import com.android.tools.metalava.cli.common.ARG_SDK_HOME
 import com.android.tools.metalava.cli.common.ARG_VERBOSE
 import com.android.tools.metalava.cli.common.ARG_WARNING
 import com.android.tools.metalava.cli.common.CheckerContext
@@ -370,6 +372,11 @@ abstract class DriverTest :
         configFiles: Array<TestFile> = emptyArray(),
         /** Any jars to add to the class path */
         classpath: Array<TestFile>? = null,
+        /**
+         * Whether to include `android.jar` on the classpath instead of using `--jdk-home` from the
+         * current JVM.
+         */
+        includeAndroidJar: Boolean = true,
         /** The API signature content (corresponds to --api) */
         @Language("TEXT") expectedApiSignature: String? = null,
         /** The removed API (corresponds to --removed-api) */
@@ -637,6 +644,7 @@ abstract class DriverTest :
                     signatureSource?.let { add(it) }
                 }
                 .toTypedArray()
+        val includeDefaultJdkHome = extraArguments.none { it == ARG_JDK_HOME || it == ARG_SDK_HOME }
         val sourceOptions =
             testSources(
                 sourceFiles = allSourceFiles,
@@ -645,7 +653,9 @@ abstract class DriverTest :
                 compiledSourceJar = compiledSourceJar,
                 classpath = classpath,
                 signatureSources = allSignatureSources,
-                skipSourceArgs = skipSourceArgs
+                skipSourceArgs = skipSourceArgs,
+                includeAndroidJar = includeAndroidJar,
+                includeDefaultJdkHome = includeDefaultJdkHome,
             )
         val projectDir = sourceOptions.projectDir
 

@@ -63,12 +63,16 @@ class TestSourceOptions(
  *   provided with [ARG_SOURCE_PATH]
  * @param projectDescription an optional XML file containing the Lint project structure
  * @param compiledSourceJar an optional jar file containing the compiled version of [sourceFiles]
- * @param classpath jars to include on the classpath (in addition to the Android jar and Kotlin
- *   stdlib)
+ * @param classpath jars to include on the classpath (in addition to the platform classpath and
+ *   Kotlin stdlib)
  * @param signatureSources signature file contents to provide as [ARG_SOURCE_FILES] instead of
  *   [sourceFiles]
  * @param skipSourceArgs if true, the created [TestSourceOptions.args] will skip [ARG_SOURCE_FILES]
  *   and [ARG_SOURCE_PATH]
+ * @param includeAndroidJar if true (and [projectDescription] is null), add `android.jar` via
+ *   [ARG_CLASS_PATH] instead of passing [ARG_JDK_HOME]
+ * @param includeDefaultJdkHome if true (and either [projectDescription] is non-null or
+ *   [includeAndroidJar] is false), pass [ARG_JDK_HOME] pointing to the current JVM's `java.home`
  */
 fun TemporaryFolderOwner.testSources(
     sourceFiles: Array<TestFile>,
@@ -78,6 +82,8 @@ fun TemporaryFolderOwner.testSources(
     classpath: Array<TestFile>?,
     signatureSources: Array<String>,
     skipSourceArgs: Boolean,
+    includeAndroidJar: Boolean = true,
+    includeDefaultJdkHome: Boolean = true,
 ): TestSourceOptions {
     val projectDir = createProjectDir(sourceFiles)
     val classpathFiles = classpath?.map { it.createFile(projectDir) }
@@ -99,13 +105,20 @@ fun TemporaryFolderOwner.testSources(
                     // Classpath isn't needed when it is specified through the project xml
                     add(ARG_PROJECT)
                     add(projectDescriptionFile.absolutePath)
-                    add(ARG_JDK_HOME)
-                    add(System.getProperty("java.home"))
+                    if (includeDefaultJdkHome) {
+                        add(ARG_JDK_HOME)
+                        add(System.getProperty("java.home"))
+                    }
                     // When project description is provided, skip listing (common) sources
                 } else {
-                    val androidJar = getAndroidJar()
-                    add(ARG_CLASS_PATH)
-                    add(androidJar.path)
+                    if (includeAndroidJar) {
+                        val androidJar = getAndroidJar()
+                        add(ARG_CLASS_PATH)
+                        add(androidJar.path)
+                    } else if (includeDefaultJdkHome) {
+                        add(ARG_JDK_HOME)
+                        add(System.getProperty("java.home"))
+                    }
                     if (classpathFiles != null) {
                         add(ARG_CLASS_PATH)
                         val classpathString =
