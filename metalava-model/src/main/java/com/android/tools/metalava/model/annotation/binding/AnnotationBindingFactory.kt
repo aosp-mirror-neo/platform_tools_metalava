@@ -42,9 +42,13 @@ interface AnnotationBindingFactory<T : Any> {
 /**
  * Bind this [AnnotationItem] from [item] to [T].
  *
- * Type [T] must be a concrete, instantiable class with at least one accessible constructor. If it
- * has more than one constructor then the constructor to use must be annotated with
- * [BindingConstructor]. It could be a `data class` but does not have to be.
+ * Type [T] must be a concrete, instantiable class (not a `@JvmInline value class`) with at least
+ * one non-`private` constructor without `@JvmInline value class` parameters. If it has more than
+ * one constructor then the constructor to use must be annotated with [BindingConstructor]. It could
+ * be a `data class` but does not have to be.
+ *
+ * Kotlin nullable (`T?`) parameter types are recognized on non-local, non-anonymous classes; local
+ * and anonymous classes only recognize runtime-retained `@Nullable` annotations.
  *
  * The parameters of the binding constructor determine how it is bound. Each parameter is bound to
  * the annotation attribute with the same name and its [AnnotationAttribute.value] it converted to

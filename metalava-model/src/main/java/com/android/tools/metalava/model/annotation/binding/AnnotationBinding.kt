@@ -21,6 +21,7 @@ import com.android.tools.metalava.model.ClassItem
 import com.android.tools.metalava.model.ClassResolver
 import com.android.tools.metalava.model.ClassTypeItem
 import com.android.tools.metalava.model.Item
+import com.android.tools.metalava.model.TypeItem
 import com.android.tools.metalava.model.annotation.AnnotationDefaults
 import com.android.tools.metalava.model.value.AnnotationValue
 import com.android.tools.metalava.model.value.ArrayElementValue
@@ -31,112 +32,148 @@ import com.android.tools.metalava.model.value.asInt
 import com.android.tools.metalava.model.value.asLong
 import com.android.tools.metalava.model.value.asString
 import com.android.tools.metalava.reporter.Issues
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Modifier
+import java.lang.reflect.ParameterizedType
+import java.lang.reflect.Type
+import java.lang.reflect.WildcardType
 import kotlin.reflect.KClass
-import kotlin.reflect.KFunction
-import kotlin.reflect.KParameter
-import kotlin.reflect.KType
 
 /**
  * Binder that can create an instance of [kClass] from an [AnnotationItem] that uses the
  * [annotationDefaults].
  */
 internal class AnnotationBinding<T : Any>(
-    private val kClass: KClass<T>,
+    kClass: KClass<T>,
     private val annotationDefaults: AnnotationDefaults?,
 ) : AnnotationBindingFactory<T> {
-    /**
-     * The [KFunction] representing the constructor that will be used to create the instance of
-     * [kClass].
-     */
-    private val bindingConstructor = kClass.selectBindingConstructor()
+    /** Reflected constructor metadata and instantiation helper for [kClass]. */
+    private val reflectedConstructor: ReflectedConstructor<T> = ReflectedConstructor.of(kClass.java)
+
+    /** Number of parameters on [reflectedConstructor]. */
+    private val parameterCount: Int = reflectedConstructor.parameterCount
 
     /**
-     * Map from attribute name to the [ParameterBinder] that will bind that attributes values to a
-     * parameter in [bindingConstructor].
+     * Binders indexed by constructor parameter position (`null` for parameters with unsupported
+     * types).
      */
-    private val bindersByName =
-        bindingConstructor.parameters
-            .mapNotNull { parameter ->
-                val name =
-                    parameter.name
-                        ?: error(
-                            "internal error: ${kClass.qualifiedName}: Cannot get name for parameter ${parameter.index}"
-                        )
-                val type = parameter.type
-                val parameterKClass =
-                    type.classifier as? KClass<*> ?: error("internal error: Cannot support $type")
+    private val bindersByIndex: Array<ParameterBinder?>
 
-                val nullableConverter = converterForType(type) ?: return@mapNotNull null
+    /**
+     * Map from attribute name to the [ParameterBinder] that will bind that attribute's values to a
+     * parameter in [reflectedConstructor].
+     */
+    private val bindersByName: Map<String, ParameterBinder>
 
-                // Get the default value specified in the annotation class declaration, if any.
-                val default = annotationDefaults?.get(name)
-                val defaultProvider: DefaultProvider? =
-                    if (default != null) {
-                        // Wrap the default [Value] in a lambda that will convert it into an
-                        // appropriate value for the parameter.
-                        {
-                            val any = nullableConverter(default)
-                            if (any == null) {
-                                reportInvalidAttributeValue(
-                                    name,
-                                    default,
-                                    parameter.type,
-                                    label = "default ",
-                                )
-                            }
-                            any
+    init {
+        val parameterNames = reflectedConstructor.classFileInfo.parameterNames
+        val parameterNullability = reflectedConstructor.classFileInfo.parameterNullability
+        val parameters = reflectedConstructor.parameters
+
+        val indexed = arrayOfNulls<ParameterBinder>(parameterCount)
+        val byName = HashMap<String, ParameterBinder>(parameterCount * 2)
+
+        for (index in 0 until parameterCount) {
+            val name =
+                parameterNames[index]
+                    ?: error(
+                        "internal error: ${reflectedConstructor.qualifiedDisplayName}: Cannot get name for parameter $index"
+                    )
+            val type = parameters[index].parameterizedType
+            val nullableConverter = converterForType(type) ?: continue
+            val rawClass = type.rawClass ?: error("internal error: Cannot support $type")
+            val nullable = parameterNullability[index]
+
+            // Get the default value specified in the annotation class declaration, if any.
+            val default = annotationDefaults?.get(name)
+            val defaultProvider: DefaultProvider? =
+                if (default != null) {
+                    // Wrap the default [Value] in a lambda that will convert it into an
+                    // appropriate value for the parameter.
+                    {
+                        val any = nullableConverter(default)
+                        if (any == null) {
+                            reportInvalidAttributeValue(
+                                name,
+                                default,
+                                type,
+                                label = "default ",
+                            )
                         }
-                    } else if (parameterKClass == Item::class) {
-                        // A parameter of type Item must be bound to the annotated item. This makes
-                        // the annotated item the default value of the parameter.
-                        { item }
-                    } else {
-                        null
+                        any
                     }
+                } else if (rawClass == Item::class.java) {
+                    // A parameter of type Item must be bound to the annotated item. This makes
+                    // the annotated item the default value of the parameter.
+                    { item }
+                } else {
+                    null
+                }
 
-                // Get a zero value to use as a last resort when a parameter is required but no
-                // value has been provided.
-                val zero =
-                    if (type.isMarkedNullable) {
-                        // If the parameter is nullable then always use a `null` as the `zero`
-                        // value.
-                        null
-                    } else {
-                        // Otherwise, compute one for the type.
-                        zeroValueForNonNullableType(type)
-                    }
+            // Get a zero value to use as a last resort when a parameter is required but no
+            // value has been provided.
+            val zero =
+                if (nullable) {
+                    // If the parameter is nullable then always use a `null` as the `zero` value.
+                    null
+                } else {
+                    // Otherwise, compute one for the type.
+                    zeroValueForNonNullableType(rawClass)
+                }
 
+            val binder =
                 ParameterBinder(
-                    name,
-                    parameter,
-                    nullableConverter,
-                    defaultProvider,
-                    zero,
+                    index = index,
+                    name = name,
+                    type = type,
+                    nullable = nullable,
+                    nullableConverter = nullableConverter,
+                    defaultProvider = defaultProvider,
+                    zero = zero,
                 )
-            }
-            .associateBy { it.name }
+            indexed[index] = binder
+            byName[name] = binder
+        }
+
+        bindersByIndex = indexed
+        bindersByName = byName
+    }
 
     override fun createInstanceFrom(
         annotationItem: AnnotationItem,
         item: Item,
     ): T? {
         val context = ConverterContext(annotationItem, item)
+        val args = Array<Any?>(parameterCount) { UNSET }
+        var defaultMasks: IntArray? = null
 
-        // Construct a map from KParameter to the value of the parameter's type to pass for that
-        // parameter to the bindingConstructor.
-        val argsByName = buildMap {
-            // Iterate over the annotation attributes, converting their values to the appropriate
-            // type for the parameter.
-            for (attribute in annotationItem.attributes) {
-                val name = attribute.name
-                val binder = bindersByName[name] ?: continue
-                val value = attribute.value
-                binder.bindToValue(context, this, value)
-            }
+        // Iterate over the annotation attributes, converting their values to the appropriate
+        // type for the parameter.
+        for (attribute in annotationItem.attributes) {
+            val binder = bindersByName[attribute.name] ?: continue
+            binder.bindToValue(context, args, attribute.value)
+        }
 
-            // Now iterate over all the parameter binders adding any additional defaults needed.
-            for (binder in bindersByName.values) {
-                binder.bindToDefault(context, this)
+        // Now iterate over all the parameter binders adding any additional defaults needed.
+        val hasDefaultConstructor = reflectedConstructor.hasDefaultConstructor
+        for (i in 0 until parameterCount) {
+            val binder = bindersByIndex[i]
+            val useKotlinDefault =
+                if (binder != null) {
+                    binder.bindToDefault(context, args, hasDefaultConstructor)
+                } else if (hasDefaultConstructor) {
+                    // Ignored parameter types cannot be bound from annotation attributes, so
+                    // request their Kotlin default value (if any) via the default-arguments mask.
+                    args[i] = defaultZeroForIgnoredType(reflectedConstructor.parameters[i].type)
+                    true
+                } else {
+                    false
+                }
+            if (useKotlinDefault) {
+                val masks =
+                    defaultMasks
+                        ?: IntArray(reflectedConstructor.maskCount).also { defaultMasks = it }
+                masks[i ushr 5] = masks[i ushr 5] or (1 shl (i and 31))
             }
         }
 
@@ -145,33 +182,52 @@ internal class AnnotationBinding<T : Any>(
             return null
         }
 
-        // Construct an instance passing in parameters by name. While great care is taken to avoid
-        // it this could throw an exception if there is some inconsistency between the annotation
-        // definition/use and the binding constructor parameters. If the exception could only be
-        // caused by errors within Metalava then it would be acceptable to have it abort processing
-        // but this could possibly be caused by changes to sources too. Aborting processing in that
-        // case would not be helpful so this catches it and reports it, returning `null` in the
-        // process.
+        // Construct an instance passing in the bound arguments. While great care is taken to avoid
+        // it, this could throw an exception if there is some inconsistency between the annotation
+        // definition/use and the binding constructor parameters. Catching and reporting prevents
+        // invalid source files from aborting processing.
         return try {
-            bindingConstructor.callBy(argsByName)
+            reflectedConstructor.newInstance(args, defaultMasks, UNSET)
         } catch (e: Exception) {
+            val cause = (e as? InvocationTargetException)?.targetException ?: e
+
+            // If a missing required non-nullable parameter had to be passed as a `null` placeholder
+            // to the synthetic default constructor and `<init>` failed with a
+            // `NullPointerException`
+            // (either in Kotlin's non-null parameter check or while evaluating a cross-parameter
+            // default expression), return `null` without reporting a duplicate internal error.
+            if (
+                context.hasNullPlaceholderForMissingParameter &&
+                    reflectedConstructor.isMissingParameterInvocationFailure(
+                        cause,
+                        usedDefaultMasks = defaultMasks != null,
+                    )
+            ) {
+                return null
+            }
             item.codebase.reporter.report(
                 Issues.INVALID_ANNOTATION_BINDING,
                 item,
-                "internal error: could not bind ${kClass.qualifiedName} to ${annotationItem.qualifiedName}: ${e.message}",
-                location = annotationItem.fileLocation
+                "internal error: could not bind ${reflectedConstructor.qualifiedDisplayName} to ${annotationItem.qualifiedName}: ${cause.message}",
+                location = annotationItem.fileLocation,
             )
             null
         }
     }
 
-    /** Binds a specific [parameter] to the value of an attribute [name]. */
+    /** Binds the constructor parameter at [index] to the value of attribute [name]. */
     private class ParameterBinder(
-        /** The parameter name, provided here as [KParameter.name] is nullable. */
+        /** Positional index of the parameter in the binding constructor. */
+        val index: Int,
+
+        /** The parameter name. */
         val name: String,
 
-        /** The [KParameter] to bound. */
-        private val parameter: KParameter,
+        /** Generic [Type] of the parameter, used in diagnostic messages. */
+        private val type: Type,
+
+        /** Indicates whether the parameter accepts `null`. */
+        private val nullable: Boolean,
 
         /** The [ValueConverter] that may produce a `null` value. */
         private val nullableConverter: ValueConverter<*>,
@@ -187,59 +243,71 @@ internal class AnnotationBinding<T : Any>(
          */
         private val zero: Any?,
     ) {
-        /** Indicates whether the parameter is nullable. */
-        private val nullable: Boolean = parameter.type.isMarkedNullable
-
-        /** Convert this [Value] within [context] to a value appropriate for [parameter]. */
+        /** Convert this [Value] within [context] to a value appropriate for this parameter. */
         private fun Value.convert(context: ConverterContext) = context.nullableConverter(this)
 
         /**
-         * Bind this [parameter] in [map] to the result of converting [value] to the parameter's
-         * type using [context].
+         * Bind this parameter in [args] to the result of converting [value] to the parameter's type
+         * using [context].
          */
         fun bindToValue(
             context: ConverterContext,
-            map: MutableMap<KParameter, Any?>,
-            value: Value
+            args: Array<Any?>,
+            value: Value,
         ) {
             val any = value.convert(context)
-            map[parameter] = any
+            args[index] = any
             if (any == null) {
-                context.reportInvalidAttributeValue(name, value, parameter.type)
+                context.reportInvalidAttributeValue(name, value, type)
             }
         }
 
         /**
-         * If this [parameter] is not already bound in [map] then bind it to the result of
-         * [defaultProvider], falling back to [zero] if necessary.
+         * If this parameter is not already bound in [args] then bind it to the result of
+         * [defaultProvider], falling back to a Kotlin constructor default (returning `true` so its
+         * default bitmask bit is set) or [zero] if necessary.
          */
-        fun bindToDefault(context: ConverterContext, map: MutableMap<KParameter, Any?>) {
+        fun bindToDefault(
+            context: ConverterContext,
+            args: Array<Any?>,
+            hasDefaultConstructor: Boolean,
+        ): Boolean {
+            val current = args[index]
+
             // If the parameter has already been set to a non-null value then there is no need to
             // provide a default.
-            if (map[parameter] != null) return
+            if (current !== UNSET && current != null) return false
 
             // If the parameter is nullable and not yet been set then set it to `null`.
             if (nullable) {
-                map[parameter] = null
-                return
+                args[index] = null
+                return false
             }
 
             // If the annotation definition provides a default then use it.
             defaultProvider?.let { provider ->
                 context.provider()?.let {
-                    map[parameter] = it
-                    return
+                    args[index] = it
+                    return false
                 }
             }
 
-            // At this point if no parameter was set in the map there is a required attribute that
+            // At this point if no parameter was set in args there is a required attribute that
             // has not been provided so report it missing.
-            if (parameter !in map) {
+            if (current === UNSET) {
                 context.reportMissingAttribute(name)
             }
 
-            // If the parameter is optional then it has its own default.
-            if (parameter.isOptional) return
+            // If the class has a synthetic Kotlin default constructor, pass the zero/null
+            // placeholder and mark this parameter's bitmask bit so any Kotlin default value on the
+            // parameter is substituted; parameters without a Kotlin default receive `zero`.
+            if (hasDefaultConstructor) {
+                args[index] = zero
+                if (zero == null) {
+                    context.markNullPlaceholderForMissingParameter()
+                }
+                return true
+            }
 
             // Otherwise, fallback to the zero value, if possible.
             if (zero == null) {
@@ -247,15 +315,16 @@ internal class AnnotationBinding<T : Any>(
                 // have returned above. That means that an instance cannot be instantiated.
                 context.doNotInstantiate()
             } else {
-                map[parameter] = zero
+                args[index] = zero
             }
+            return false
         }
     }
 
-    /** Factory for creating [ValueConverter]s from [KType]. */
+    /** Factory for creating [ValueConverter]s from [Type]. */
     private interface ConverterFactory {
         /** Create a [ValueConverter] from [type]. */
-        fun createConverter(type: KType): ValueConverter<*>
+        fun createConverter(type: Type): ValueConverter<*>
     }
 
     /**
@@ -265,8 +334,28 @@ internal class AnnotationBinding<T : Any>(
      * retrieved by [converterForType].
      */
     private class ListConverterFactory : ConverterFactory {
-        override fun createConverter(type: KType): ValueConverter<List<*>> {
-            val elementType = type.arguments[0].type ?: error("Star projections are not supported")
+        override fun createConverter(type: Type): ValueConverter<List<*>> {
+            val paramType =
+                type as? ParameterizedType ?: error("Raw List type is not supported: $type")
+            val rawArg = paramType.actualTypeArguments[0]
+
+            // Kotlin's covariant `List<out E>` compiles to `List<? extends E>` (`WildcardType`)
+            // when `E` is an interface or open class (e.g. `ArrayElementValue`). Unwrap the upper
+            // bound while rejecting unbounded `?` star projections.
+            val elementType =
+                when (rawArg) {
+                    is WildcardType -> {
+                        val upper = rawArg.upperBounds.singleOrNull()
+                        if (
+                            upper == null ||
+                                (upper == Any::class.java && rawArg.lowerBounds.isEmpty())
+                        ) {
+                            error("Star projections are not supported")
+                        }
+                        upper
+                    }
+                    else -> rawArg
+                }
             val elementConverter =
                 converterForType(elementType) ?: error("unsupported element type: $elementType")
             return { value ->
@@ -278,8 +367,8 @@ internal class AnnotationBinding<T : Any>(
 
     /** Creates [ValueConverter] that will bind a nested [AnnotationItem] to a class. */
     private class NestedBindingConverterFactory<T : Any> : ConverterFactory {
-        override fun createConverter(type: KType): ValueConverter<T> {
-            @Suppress("UNCHECKED_CAST") val bindingClass = type.classifier as KClass<T>
+        override fun createConverter(type: Type): ValueConverter<T> {
+            @Suppress("UNCHECKED_CAST") val bindingClass = (type.rawClass as Class<T>).kotlin
             return { value ->
                 val annotationItem = annotationItemConverter(value)
                 annotationItem?.bindTo(bindingClass, item)
@@ -288,66 +377,42 @@ internal class AnnotationBinding<T : Any>(
     }
 
     companion object {
-        /**
-         * Select the binding constructor to use on this [KClass].
-         *
-         * If [KClass] only has a single constructor that is returned. Otherwise, the constructor
-         * that is annotated with [BindingConstructor] is returned.
-         */
-        private fun <T : Any> KClass<T>.selectBindingConstructor(): KFunction<T> {
-            val constructors = constructors
-            return when (constructors.size) {
-                0 ->
-                    error(
-                        "Cannot create an instance of ${this.qualifiedName} as it has no constructors"
-                    )
-                1 -> constructors.single()
-                else -> {
-                    val annotated =
-                        constructors.filter { constructor ->
-                            constructor.annotations.any { annotation ->
-                                annotation is BindingConstructor
-                            }
-                        }
-                    when (annotated.size) {
-                        0 ->
-                            error(
-                                "Found multiple constructors in ${this.qualifiedName}; please annotate one with @BindingConstructor"
-                            )
-                        1 -> annotated.single()
-                        else ->
-                            error(
-                                "Found multiple constructors in ${this.qualifiedName} that are annotated with @BindingConstructor, please annotate only one"
-                            )
-                    }
+        /** Sentinel marking an unbound slot in the constructor argument array. */
+        private val UNSET = Any()
+
+        private val Type.rawClass: Class<*>?
+            get() =
+                when (this) {
+                    is Class<*> -> this
+                    is ParameterizedType -> rawType as? Class<*>
+                    else -> null
                 }
-            }
-        }
 
-        /** Create a [ValueConverter] to type [T], using [conversion]. */
-        private inline fun <reified T : Any> MutableMap<KClass<*>, ValueConverter<*>>
-            .registerValueConverter(
-            noinline conversion: ValueConverter<T>,
-        ) = conversion.also { put(T::class, it) }
+        /** Map from [Class] to the [ValueConverter]. */
+        private val valueConvertersByClass: Map<Class<*>, ValueConverter<*>> = buildMap {
+            val register = { cls: Class<*>, converter: ValueConverter<*> -> put(cls, converter) }
 
-        /** Map from [KClass] to the [ValueConverter]. */
-        private val valueConvertersByKClass = buildMap {
             // Convert from a [Value] to an [AnnotationItem].
-            registerValueConverter { value -> (value as? AnnotationValue)?.annotationItem }
+            register(AnnotationItem::class.java) { value ->
+                (value as? AnnotationValue)?.annotationItem
+            }
 
             // Converter from a [Value] to an [ArrayElementValue].
-            registerValueConverter { value -> value as? ArrayElementValue }
+            register(ArrayElementValue::class.java) { value -> value as? ArrayElementValue }
 
             // Converter from a [Value] to a [Boolean].
-            registerValueConverter { value -> value.asBoolean() }
+            val booleanConverter: ValueConverter<Boolean> = { value -> value.asBoolean() }
+            register(Boolean::class.javaPrimitiveType!!, booleanConverter)
+            register(Boolean::class.javaObjectType, booleanConverter)
 
             // Converter from a [Value] to a [TypeItem].
-            val typeItemConverter = registerValueConverter { value ->
+            val typeItemConverter: ValueConverter<TypeItem> = { value ->
                 (value as? ClassObjectValue)?.typeItem
             }
+            register(TypeItem::class.java, typeItemConverter)
 
             // Converter from a [Value] to a [ClassItem].
-            registerValueConverter { value ->
+            register(ClassItem::class.java) { value ->
                 typeItemConverter(this, value)?.let { typeItem ->
                     (typeItem as? ClassTypeItem)?.let { classTypeItem ->
                         val qualifiedName = classTypeItem.qualifiedName
@@ -357,53 +422,53 @@ internal class AnnotationBinding<T : Any>(
             }
 
             // Converter from a [Value] to an [Int].
-            registerValueConverter { value -> value.asInt() }
+            val intConverter: ValueConverter<Int> = { value -> value.asInt() }
+            register(Int::class.javaPrimitiveType!!, intConverter)
+            register(Int::class.javaObjectType, intConverter)
 
             // Converter from a [Value] to a [Long].
-            registerValueConverter { value -> value.asLong() }
+            val longConverter: ValueConverter<Long> = { value -> value.asLong() }
+            register(Long::class.javaPrimitiveType!!, longConverter)
+            register(Long::class.javaObjectType, longConverter)
 
             // Converter from a [Value] to a [String].
-            registerValueConverter { value -> value.asString() }
+            register(String::class.java) { value -> value.asString() }
         }
 
         /** Convert a [Value] to an [AnnotationItem]. */
-        private val annotationItemConverter = converterForClass<AnnotationItem>()
-
-        /** Get the [ValueConverter] to use for converting [Value]s to [T]. */
         @Suppress("UNCHECKED_CAST")
-        private inline fun <reified T : Any> converterForClass() =
-            valueConvertersByKClass[T::class] as ValueConverter<T?>
+        private val annotationItemConverter =
+            valueConvertersByClass[AnnotationItem::class.java] as ValueConverter<AnnotationItem?>
 
-        /** Map from [KClass] to the [ConverterFactory]. */
-        private val valueConverterFactoryByKClass = buildMap {
-            // [ConverterFactory] that will convert to a [List] of elements.
-            put(List::class, ListConverterFactory() as ConverterFactory)
-        }
+        /** Map from [Class] to the [ConverterFactory]. */
+        private val valueConverterFactoryByClass =
+            mapOf<Class<*>, ConverterFactory>(
+                List::class.java to ListConverterFactory(),
+            )
 
         /** Create [ValueConverter] that will bind a nested [AnnotationItem] to a nested class. */
         private val nestedBindingConverterFactory = NestedBindingConverterFactory<Any>()
 
         /** Get the [ValueConverter] to use for converting [Value]s to [type]. */
-        private fun converterForType(type: KType): (ValueConverter<*>)? {
-            val classifier = type.classifier
-            val kClass = classifier as? KClass<*> ?: return null
+        private fun converterForType(type: Type): (ValueConverter<*>)? {
+            val rawClass = type.rawClass ?: return null
 
             // If binding to the annotated item then there is no value to convert. This returns a
             // non-null converter to prevent an error being reported. The converter returns null to
             // ensure that if a value was provided for a parameter of that type that it would
             // report an error.
-            if (kClass == Item::class) {
+            if (rawClass == Item::class.java) {
                 return { null }
             }
 
             // Try one of the built-in conversions first.
-            valueConvertersByKClass[kClass]?.let {
+            valueConvertersByClass[rawClass]?.let {
                 return it
             }
 
-            // Get the factory for the classifier.
+            // Get the factory for the raw class.
             val factory =
-                converterFactoryForKClass(kClass)
+                converterFactoryForClass(rawClass)
                     // No factory was found so return `null` to indicate that the type is not
                     // supported.
                     ?: return null
@@ -412,37 +477,63 @@ internal class AnnotationBinding<T : Any>(
             return factory.createConverter(type)
         }
 
-        /** Get the [ConverterFactory], if any, for [kClass] */
-        private fun converterFactoryForKClass(kClass: KClass<*>): ConverterFactory? {
-            valueConverterFactoryByKClass[kClass]?.let {
+        /** Get the [ConverterFactory], if any, for [rawClass]. */
+        private fun converterFactoryForClass(rawClass: Class<*>): ConverterFactory? {
+            valueConverterFactoryByClass[rawClass]?.let {
                 return it
             }
 
             // Ignore classes that cannot be created from an annotation.
-            if (kClass.isAbstract || kClass.isValue || kClass.isInner || kClass.java.isPrimitive)
+            val isInner = rawClass.isMemberClass && !Modifier.isStatic(rawClass.modifiers)
+            val isValue = rawClass.isAnnotationPresent(JvmInline::class.java)
+            if (
+                Modifier.isAbstract(rawClass.modifiers) ||
+                    isValue ||
+                    isInner ||
+                    rawClass.isEnum ||
+                    rawClass.isPrimitive
+            ) {
                 return null
+            }
 
             // Use the nested binding factory.
             return nestedBindingConverterFactory
         }
 
-        /**
-         * Get a zero value for [type], or `null` if none could be found.
-         *
-         * Ignores [KType.isMarkedNullable] on [type].
-         */
-        private fun zeroValueForNonNullableType(type: KType) =
-            when (val classifier = type.classifier) {
-                null -> null
-                Boolean::class -> false
-                Int::class -> 0
-                Long::class -> 0L
-                String::class -> ""
-                List::class -> emptyList<Any>()
+        /** Get a zero value for a non-nullable [rawClass], or `null` if none could be found. */
+        private fun zeroValueForNonNullableType(rawClass: Class<*>): Any? =
+            when (rawClass) {
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaObjectType -> false
+                Int::class.javaPrimitiveType,
+                Int::class.javaObjectType -> 0
+                Long::class.javaPrimitiveType,
+                Long::class.javaObjectType -> 0L
+                String::class.java -> ""
+                List::class.java -> emptyList<Any>()
                 else ->
-                    if (classifier.javaClass.isPrimitive)
-                        error("Must provide a zero value for primitive type $classifier")
-                    else null
+                    if (rawClass.isPrimitive) {
+                        error("Must provide a zero value for primitive type $rawClass")
+                    } else {
+                        null
+                    }
+            }
+
+        /**
+         * Get a JVM zero/null placeholder value for an ignored parameter of [type] when invoking a
+         * synthetic Kotlin default-arguments constructor.
+         */
+        private fun defaultZeroForIgnoredType(type: Class<*>): Any? =
+            when (type) {
+                Boolean::class.javaPrimitiveType -> false
+                Byte::class.javaPrimitiveType -> 0.toByte()
+                Short::class.javaPrimitiveType -> 0.toShort()
+                Char::class.javaPrimitiveType -> '\u0000'
+                Int::class.javaPrimitiveType -> 0
+                Long::class.javaPrimitiveType -> 0L
+                Float::class.javaPrimitiveType -> 0f
+                Double::class.javaPrimitiveType -> 0.0
+                else -> null
             }
     }
 }
@@ -468,13 +559,20 @@ internal class ConverterContext(
     var doNotInstantiate = false
         private set
 
+    /**
+     * Tracks whether a `null` placeholder was supplied to a synthetic Kotlin default constructor
+     * for a missing required non-nullable parameter.
+     */
+    var hasNullPlaceholderForMissingParameter = false
+        private set
+
     /** Report that attribute [name]'s [value] cannot be converted to [type]. */
-    fun reportInvalidAttributeValue(name: String, value: Value, type: KType, label: String = "") {
+    fun reportInvalidAttributeValue(name: String, value: Value, type: Type, label: String = "") {
         item.codebase.reporter.report(
             Issues.INVALID_ANNOTATION_BINDING,
             item,
-            "Attribute '$name' is invalid: $label`${value.toValueString()}` cannot be converted to $type",
-            location = annotation.fileLocation
+            "Attribute '$name' is invalid: $label`${value.toValueString()}` cannot be converted to ${type.typeName}",
+            location = annotation.fileLocation,
         )
 
         // There was some inconsistency encountered between the source annotation instance and the
@@ -488,8 +586,16 @@ internal class ConverterContext(
             Issues.MISSING_REQUIRED_ATTRIBUTE,
             item,
             "Required attribute '$name' is missing on @${annotation.originalName}",
-            location = annotation.fileLocation
+            location = annotation.fileLocation,
         )
+    }
+
+    /**
+     * Record that a `null` placeholder was passed for a missing required non-nullable parameter on
+     * a constructor with Kotlin default values.
+     */
+    fun markNullPlaceholderForMissingParameter() {
+        hasNullPlaceholderForMissingParameter = true
     }
 
     /**

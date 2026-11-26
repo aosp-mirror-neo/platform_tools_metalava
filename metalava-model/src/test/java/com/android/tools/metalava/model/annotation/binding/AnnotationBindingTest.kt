@@ -138,12 +138,26 @@ class AnnotationBindingTest {
 
     @Test
     fun `Test parameter with value class type`() {
-        // TODO(b/499055608): Under Java reflection, `kotlinc` lowers constructors with direct
-        //  `@JvmInline value class` parameters (boxed or unboxed) to private constructors with a
-        //  synthetic `DefaultConstructorMarker` bridge (omitting nullability metadata and unboxing
-        //  non-null / reference-backed value classes), so they should be rejected rather than
-        //  silently binding unboxed carrier types or dropping sibling nullability.
-        AnnotationBinding(UnsupportedValueClassParameter::class, null)
-        AnnotationBinding(BoxedValueClassParameter::class, null)
+        val targetException =
+            assertThrows(IllegalStateException::class.java) {
+                AnnotationBinding(InlineInt::class, null)
+            }
+        assertEquals(
+            "Cannot create an instance of value class com.android.tools.metalava.model.annotation.binding.AnnotationBindingTest.InlineInt",
+            targetException.message,
+        )
+
+        for (kClass in
+            listOf(
+                UnsupportedValueClassParameter::class,
+                BoxedValueClassParameter::class,
+            )) {
+            val exception =
+                assertThrows(IllegalStateException::class.java) { AnnotationBinding(kClass, null) }
+            assertEquals(
+                "Cannot create an instance of ${kClass.java.canonicalName} as its binding constructor has value class parameters",
+                exception.message,
+            )
+        }
     }
 }

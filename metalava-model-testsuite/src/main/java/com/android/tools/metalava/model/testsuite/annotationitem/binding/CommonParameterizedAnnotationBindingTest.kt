@@ -394,7 +394,7 @@ class CommonParameterizedAnnotationBindingTest : BaseModelTest() {
                     annotation = "@BooleanAnno(value = true)",
                     expectedBound = null,
                     expectedIssues =
-                        "MAIN_SRC/src/test/pkg/Test.java:2: error: internal error: could not bind com.android.tools.metalava.model.testsuite.annotationitem.binding.CommonParameterizedAnnotationBindingTest.InvalidClass to test.pkg.BooleanAnno: No argument provided for a required parameter: parameter #0 invalid of fun `<init>`(java.lang.Runnable): com.android.tools.metalava.model.testsuite.annotationitem.binding.CommonParameterizedAnnotationBindingTest.InvalidClass [InvalidAnnotationBinding]",
+                        "MAIN_SRC/src/test/pkg/Test.java:2: error: internal error: could not bind com.android.tools.metalava.model.testsuite.annotationitem.binding.CommonParameterizedAnnotationBindingTest.InvalidClass to test.pkg.BooleanAnno: No argument provided for a required parameter: parameter #0 invalid of public com.android.tools.metalava.model.testsuite.annotationitem.binding.CommonParameterizedAnnotationBindingTest\$InvalidClass(java.lang.Runnable) [InvalidAnnotationBinding]",
                 ),
 
                 // Invalid value test.
@@ -404,7 +404,7 @@ class CommonParameterizedAnnotationBindingTest : BaseModelTest() {
                     annotation = "@BooleanAnno(value = false)",
                     expectedBound = null,
                     expectedIssues =
-                        "MAIN_SRC/src/test/pkg/Test.java:2: error: Attribute 'value' is invalid: `false` cannot be converted to kotlin.String [InvalidAnnotationBinding]",
+                        "MAIN_SRC/src/test/pkg/Test.java:2: error: Attribute 'value' is invalid: `false` cannot be converted to java.lang.String [InvalidAnnotationBinding]",
                 ),
 
                 // Single value types tests.
