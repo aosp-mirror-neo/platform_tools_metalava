@@ -34,7 +34,7 @@ object KnownJarFiles {
         require(envValue.isNotBlank()) {
             "Invalid environment variable METALAVA_STUB_ANNOTATIONS_JAR: '$envValue'"
         }
-        val jar = File(envValue)
+        val jar = File(envValue).absoluteFile
         require(jar.isFile) { "stub-annotations jar not found: $jar" }
         jar
     }

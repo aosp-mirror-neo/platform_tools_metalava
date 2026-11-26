@@ -54,6 +54,8 @@ dependencies {
 }
 
 val testDataDir = layout.projectDirectory.dir("src/testdata")
+val stubAnnotationsSrcDir =
+    isolated.rootProject.projectDirectory.dir("stub-annotations/src/main/java")
 
 tasks.named<Test>("test").configure {
     // Add some additional environment variables to pass in some directories needed by the test.
@@ -62,6 +64,16 @@ tasks.named<Test>("test").configure {
             "METALAVA_TESTDATA_DIR" to testDataDir.asFile.absolutePath,
         )
     )
+
+    // Track stub-annotations sources with relative path sensitivity and pass the absolute path at
+    // execution time so it is not baked into the build cache key.
+    inputs
+        .dir(stubAnnotationsSrcDir)
+        .withPropertyName("stubAnnotationsSrcDir")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    val stubAnnotationsSrcDirPath = stubAnnotationsSrcDir.asFile.absolutePath
+    doFirst { environment["METALAVA_STUB_ANNOTATIONS_SRC_DIR"] = stubAnnotationsSrcDirPath }
 }
 
 // Copy the version.properties from the root project into its own directory.

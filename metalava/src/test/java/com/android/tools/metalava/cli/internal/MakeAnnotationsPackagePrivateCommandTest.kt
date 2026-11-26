@@ -22,7 +22,6 @@ import kotlin.text.Charsets.UTF_8
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 
 class MakeAnnotationsPackagePrivateCommandTest :
@@ -50,13 +49,17 @@ Arguments:
         }
     }
 
-    private val stubAnnotationsDir = File("../stub-annotations/src/main/java")
-
-    @Before
-    fun `Check assumptions`() {
-        // Make sure that this is being run in the main metalava directory as this directly
-        // accesses files within it.
-        assertTrue(stubAnnotationsDir.path, stubAnnotationsDir.isDirectory)
+    /** The `stub-annotations` source directory specified by `METALAVA_STUB_ANNOTATIONS_SRC_DIR`. */
+    private val stubAnnotationsDir by lazy {
+        val envValue =
+            System.getenv("METALAVA_STUB_ANNOTATIONS_SRC_DIR")
+                ?: error("Environment variable METALAVA_STUB_ANNOTATIONS_SRC_DIR was not set")
+        require(envValue.isNotBlank()) {
+            "Invalid environment variable METALAVA_STUB_ANNOTATIONS_SRC_DIR: '$envValue'"
+        }
+        val dir = File(envValue).absoluteFile
+        require(dir.isDirectory) { "stub-annotations source directory not found: $dir" }
+        dir
     }
 
     @Test

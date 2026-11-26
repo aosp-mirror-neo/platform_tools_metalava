@@ -25,19 +25,22 @@ import java.io.File
  */
 private const val API_LEVEL = 34
 
-/**
- * Check to see if this file is the top level metalava directory by looking for a `metalava-model`
- * directory.
- */
-private fun File.isMetalavaRootDir(): Boolean = resolve("metalava-model").isDirectory
+/** Name of the environment variable pointing to `android.jar` for tests. */
+private const val ENV_VAR_ANDROID_JAR = "METALAVA_ANDROID_JAR"
 
-/** Get a [File] for the public `android.jar` of [API_LEVEL]. */
+/** Name of the environment variable pointing to the `prebuilts-sdk` directory for tests. */
+private const val ENV_VAR_PREBUILTS_SDK_DIR = "METALAVA_PREBUILTS_SDK_DIR"
+
+/** Get a [File] for the `android.jar` specified by [ENV_VAR_ANDROID_JAR]. */
 fun getAndroidJar(): File {
-    val localFile = getPrebuiltsSdkDir().resolve("$API_LEVEL/public/android.jar")
-    if (!localFile.exists()) {
-        error("Missing ${localFile.absolutePath} file in the SDK")
+    val envValue =
+        System.getenv(ENV_VAR_ANDROID_JAR)
+            ?: error("Environment variable $ENV_VAR_ANDROID_JAR was not set")
+    require(envValue.isNotBlank()) {
+        "Invalid environment variable $ENV_VAR_ANDROID_JAR: '$envValue'"
     }
-
+    val localFile = File(envValue).absoluteFile
+    require(localFile.isFile) { "android.jar not found: ${localFile.path}" }
     return localFile
 }
 
@@ -51,21 +54,15 @@ fun getAndroidTxt(apiLevel: Int = API_LEVEL, apiSurface: String = "public"): Fil
     return localFile
 }
 
-private fun getMetalavaDir(): File {
-    // This is either running in tools/metalava or tools/metalava/subproject-dir and we need to look
-    // in prebuilts/sdk, so first find tools/metalava then resolve relative to that.
-    val cwd = File("").absoluteFile
-    val metalavaDir =
-        if (cwd.isMetalavaRootDir()) cwd
-        else {
-            val parent = cwd.parentFile
-            if (parent.isMetalavaRootDir()) parent
-            else {
-                throw IllegalArgumentException("Could not find metalava-model in $cwd")
-            }
-        }
-    return metalavaDir
+/** The `prebuilts/sdk` directory used for testing, specified by [ENV_VAR_PREBUILTS_SDK_DIR]. */
+fun getPrebuiltsSdkDir(): File {
+    val envValue =
+        System.getenv(ENV_VAR_PREBUILTS_SDK_DIR)
+            ?: error("Environment variable $ENV_VAR_PREBUILTS_SDK_DIR was not set")
+    require(envValue.isNotBlank()) {
+        "Invalid environment variable $ENV_VAR_PREBUILTS_SDK_DIR: '$envValue'"
+    }
+    val dir = File(envValue).absoluteFile
+    require(dir.isDirectory) { "prebuilts-sdk directory not found: ${dir.path}" }
+    return dir
 }
-
-/** The `prebuilts/sdk` directory used for testing. */
-fun getPrebuiltsSdkDir(): File = getMetalavaDir().resolve("test-data/prebuilts-sdk")

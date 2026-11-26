@@ -31,6 +31,7 @@ import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
 import org.gradle.api.publish.tasks.GenerateModuleMetadata
 import org.gradle.api.tasks.ClasspathNormalizer
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.testing.Test
@@ -111,6 +112,10 @@ class MetalavaBuildPlugin : Plugin<Project> {
                 zip.from(testTask.map { it.reports.junitXml.outputLocation.get() })
             }
 
+        val prebuiltsSdkDir =
+            project.isolated.rootProject.projectDirectory.dir("test-data/prebuilts-sdk").asFile
+        val androidJar = prebuiltsSdkDir.resolve("34/public/android.jar")
+
         testTask.configure { task ->
             task.jvmArgs = listOf(
                 "--add-opens=java.base/java.lang=ALL-UNNAMED",
@@ -128,12 +133,24 @@ class MetalavaBuildPlugin : Plugin<Project> {
             // in command line help.
             task.setEnvironment()
 
+            // Make test task depend on the prebuilts-sdk directory with relative path sensitivity
+            // so the build cache remains relocatable and edits under test-data/prebuilts-sdk
+            // invalidate the task.
+            task.inputs.dir(prebuiltsSdkDir)
+                .withPropertyName("prebuiltsSdkDir")
+                .withPathSensitivity(PathSensitivity.RELATIVE)
+
             // Make test task depend on the stubAnnotations and normalize it as a classpath input.
             task.inputs.files(stubAnnotations)
                 .withPropertyName("stubAnnotations")
                 .withNormalizer(ClasspathNormalizer::class.java)
 
             task.doFirst {
+                // Pass test data paths at execution time so checkout-specific absolute paths are
+                // not baked into the configuration-time environment cache key.
+                task.environment["METALAVA_PREBUILTS_SDK_DIR"] = prebuiltsSdkDir.absolutePath
+                task.environment["METALAVA_ANDROID_JAR"] = androidJar.absolutePath
+
                 // Get the path to the stub-annotations jar and pass it to this in an environment
                 // variable.
                 task.environment["METALAVA_STUB_ANNOTATIONS_JAR"] =
