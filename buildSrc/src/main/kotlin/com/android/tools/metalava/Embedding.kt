@@ -38,12 +38,16 @@ import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.attributes.Usage
 import org.gradle.api.attributes.java.TargetJvmEnvironment
 import org.gradle.api.attributes.java.TargetJvmVersion
+import org.gradle.api.distribution.DistributionContainer
 import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.plugins.ApplicationPlugin
 import org.gradle.api.plugins.JavaLibraryPlugin
 import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.provider.Provider
 import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.application.CreateStartScripts
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.exclude
 import org.gradle.kotlin.dsl.named
@@ -113,6 +117,8 @@ private val LOCAL_EMBED_CLASSPATH_CONFIGS =
  *   `ExcludeRule`s on transitive edges, any `exclude(...)` rule for an embedded project's external
  *   boundary dependency must be declared on the host project (where it is preserved across
  *   promotion).
+ * - Filter embedded subproject JARs out of `application` distributions (`installDist`, `distZip`,
+ *   `distTar`, and `startScripts`).
  */
 internal fun configureEmbedding(project: Project) {
     project.plugins.withType(JavaPlugin::class.java) {
@@ -211,6 +217,10 @@ internal fun configureEmbedding(project: Project) {
             }
 
             configureMergedJar(project, embedCluster.get())
+
+            if (project.plugins.hasPlugin(ApplicationPlugin::class.java)) {
+                configureApplicationDistribution(project, embedCluster.get())
+            }
         }
     }
 
@@ -752,3 +762,72 @@ private fun configureMergedJar(project: Project, embedCluster: Configuration) {
         jar.from(mergeServiceFilesTask)
     }
 }
+
+/**
+ * Updates `application` plugin distribution tasks (`startScripts`, `installDist`, `distZip`,
+ * `distTar`) to exclude embedded subproject JARs from `lib/` and the launcher classpath, because
+ * their classes and resources are already merged into the host JAR.
+ */
+private fun configureApplicationDistribution(project: Project, embedCluster: Configuration) {
+    val runtimeClasspath = project.configurations.named("runtimeClasspath").get()
+
+    // Route through resolveEmbeddedClusterPaths so :startScripts and :installDist emit the same
+    // actionable error message as :jar and :publish when an embedded target lacks embedElements.
+    val embeddedPathsProvider =
+        project.provider { resolveEmbeddedClusterPaths(project, embedCluster) }
+
+    // Partition runtimeClasspath into two complementary views: startScripts takes an explicit
+    // non-embedded classpath (jarTask + distRuntimeFiles), whereas Gradle's application
+    // distribution CopySpec includes runtimeClasspath implicitly and needs the exact embedded JAR
+    // paths to exclude them via eachFile.
+    val distRuntimeFiles =
+        runtimeClasspath.incoming
+            .artifactView { view ->
+                view.componentFilter { id ->
+                    !isEmbeddedProjectComponent(id, embeddedPathsProvider)
+                }
+            }
+            .files
+
+    val embeddedRuntimeJarFiles =
+        runtimeClasspath.incoming
+            .artifactView { view ->
+                view.componentFilter { id -> isEmbeddedProjectComponent(id, embeddedPathsProvider) }
+            }
+            .files
+
+    // Store normalized absolute path strings (Configuration-Cache-serializable) so relative build
+    // directories such as "../../out" (when OUT_DIR is unset) match details.file accurately.
+    val embeddedJarNormalizedPaths =
+        embeddedRuntimeJarFiles.elements.map { locations ->
+            locations.map { it.asFile.toPath().toAbsolutePath().normalize().toString() }.toSet()
+        }
+
+    val jarTask = project.tasks.named("jar")
+    project.tasks.named("startScripts", CreateStartScripts::class.java).configure { scripts ->
+        scripts.classpath = project.objects.fileCollection().from(jarTask, distRuntimeFiles)
+    }
+
+    project.extensions.getByType(DistributionContainer::class.java).named("main").configure {
+        distribution ->
+        distribution.contents { spec ->
+            spec.eachFile { details ->
+                if (
+                    details.file.toPath().toAbsolutePath().normalize().toString() in
+                        embeddedJarNormalizedPaths.get()
+                ) {
+                    details.exclude()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Returns true if [id] is a local project component belonging to the embedded project paths in
+ * [embeddedPathsProvider].
+ */
+private fun isEmbeddedProjectComponent(
+    id: ComponentIdentifier,
+    embeddedPathsProvider: Provider<Set<String>>,
+): Boolean = id is ProjectComponentIdentifier && id.projectPath in embeddedPathsProvider.get()

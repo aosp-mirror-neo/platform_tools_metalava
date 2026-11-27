@@ -458,6 +458,217 @@ class ProjectEmbeddingTest {
     }
 
     @Test
+    fun `embedImplementation on application filters installDist and startScripts and keeps API clean`() {
+        // Use a relative "../../out" build directory (matching OUT_DIR unset) so path
+        // normalization in configureApplicationDistribution's eachFile filter is exercised.
+        val workspace = TestMetalavaWorkspace.create(tempFolder, useRelativeOutDir = true)
+        workspace.publishExternalLibrary(
+            group = "com.example",
+            artifact = "ext-api",
+            version = "1.0.0",
+            packageName = "com.example.extapi",
+            className = "ExtGreeting",
+            source =
+                """
+                    package com.example.extapi;
+                    public class ExtGreeting {
+                        public static String format(String s) { return "hello-" + s; }
+                    }
+                """
+                    .trimIndent(),
+        )
+        workspace.publishExternalLibrary(
+            group = "com.example",
+            artifact = "ext-impl",
+            version = "1.0.0",
+            packageName = "com.example.extimpl",
+            className = "ExtSuffix",
+            source =
+                """
+                    package com.example.extimpl;
+                    public class ExtSuffix {
+                        public static String suffix() { return "!"; }
+                    }
+                """
+                    .trimIndent(),
+        )
+
+        workspace.addSubproject(
+            path = ":feature",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("org.jetbrains.kotlin.jvm")
+                        id("metalava-build-plugin")
+                    }
+                    dependencies {
+                        api("com.example:ext-api:1.0.0")
+                        implementation("com.example:ext-impl:1.0.0")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/kotlin/com/example/feature/FeatureEngine.kt" to
+                        """
+                            package com.example.feature
+
+                            import com.example.extapi.ExtGreeting
+                            import com.example.extimpl.ExtSuffix
+
+                            object FeatureEngine {
+                                fun run(name: String): String =
+                                    ExtGreeting.format(name) + ExtSuffix.suffix()
+                            }
+                        """
+                            .trimIndent()
+                ),
+        )
+
+        workspace.addSubproject(
+            path = ":published-dep",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("org.jetbrains.kotlin.jvm")
+                        id("metalava-build-plugin")
+                        id("maven-publish")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/kotlin/com/example/pubdep/PubBanner.kt" to
+                        """
+                            package com.example.pubdep
+
+                            object PubBanner {
+                                fun prefix(): String = "[pub] "
+                            }
+                        """
+                            .trimIndent()
+                ),
+        )
+
+        workspace.addSubproject(
+            path = ":app",
+            buildScript =
+                """
+                    plugins {
+                        id("application")
+                        id("org.jetbrains.kotlin.jvm")
+                        id("maven-publish")
+                        id("metalava-build-plugin")
+                    }
+                    application {
+                        mainClass.set("com.example.app.AppMain")
+                    }
+                    dependencies {
+                        implementation(project(":published-dep"))
+                        embedImplementation(project(":feature"))
+                        testImplementation("junit:junit:4.13.2")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/kotlin/com/example/app/AppMain.kt" to
+                        """
+                            package com.example.app
+
+                            import com.example.feature.FeatureEngine
+                            import com.example.pubdep.PubBanner
+
+                            object AppMain {
+                                @JvmStatic
+                                fun main(args: Array<String>) {
+                                    println(PubBanner.prefix() + FeatureEngine.run(args.firstOrNull() ?: "world"))
+                                }
+                            }
+                        """
+                            .trimIndent(),
+                    "src/test/kotlin/com/example/app/AppMainTest.kt" to
+                        """
+                            package com.example.app
+
+                            import com.example.feature.FeatureEngine
+                            import org.junit.Assert.assertEquals
+                            import org.junit.Test
+
+                            class AppMainTest {
+                                @Test
+                                fun `application tests can access embedded feature`() {
+                                    assertEquals("hello-test!", FeatureEngine.run("test"))
+                                }
+                            }
+                        """
+                            .trimIndent(),
+                ),
+        )
+
+        workspace.run(":app:test", ":app:installDist", ":app:distZip", ":app:publish")
+
+        // Verify installDist lib/ retains the merged app JAR, published sibling JAR, and external
+        // deps, while excluding the embedded feature JAR.
+        val installDir = File(workspace.outDir, "metalava/app/build/install/app")
+        val libFiles = File(installDir, "lib").listFiles()?.map { it.name }.orEmpty()
+        assertThat(libFiles)
+            .containsAtLeast(
+                "app-$TEST_VERSION.jar",
+                "published-dep-$TEST_VERSION.jar",
+                "ext-api-1.0.0.jar",
+                "ext-impl-1.0.0.jar",
+            )
+        assertThat(libFiles.none { it.startsWith("feature-") }).isTrue()
+
+        // Verify startScripts retains published-dep and excludes embedded feature JAR.
+        val unixScript = File(installDir, "bin/app").readText()
+        assertThat(unixScript).contains("app-$TEST_VERSION.jar")
+        assertThat(unixScript).contains("published-dep-$TEST_VERSION.jar")
+        assertThat(unixScript).doesNotContain("feature-$TEST_VERSION.jar")
+
+        // Verify distZip retains published-dep and excludes embedded feature JAR.
+        val distZip =
+            File(workspace.outDir, "metalava/app/build/distributions/app-$TEST_VERSION.zip")
+        val zipEntries = jarEntries(distZip)
+        assertThat(zipEntries.any { it.endsWith("/lib/app-$TEST_VERSION.jar") }).isTrue()
+        assertThat(zipEntries.any { it.endsWith("/lib/published-dep-$TEST_VERSION.jar") }).isTrue()
+        assertThat(zipEntries.none { it.contains("feature-") }).isTrue()
+
+        // Execute the installed distribution script end-to-end.
+        val process = ProcessBuilder(File(installDir, "bin/app").absolutePath, "metalava").start()
+        val stdout = process.inputStream.bufferedReader().readText().trim()
+        val stderrLines =
+            process.errorStream.bufferedReader().readLines().filter {
+                it.isNotBlank() && !it.startsWith("Picked up _JAVA_OPTIONS:")
+            }
+        assertThat(process.waitFor()).isEqualTo(0)
+        assertThat(stderrLines).isEmpty()
+        assertThat(stdout).isEqualTo("[pub] hello-metalava!")
+
+        // Verify published metadata keeps ext-api and ext-impl in runtime scope only, never
+        // apiElements, and omits feature.
+        val publishedDir = workspace.publishedArtifactDir("app")
+        val pomDeps = parsePomDependencies(File(publishedDir, "app-$TEST_VERSION.pom"))
+        assertThat(pomDeps["com.example:ext-api:1.0.0"]).isEqualTo("runtime")
+        assertThat(pomDeps["com.example:ext-impl:1.0.0"]).isEqualTo("runtime")
+        assertThat(pomDeps.keys.none { it.contains("feature") }).isTrue()
+
+        val moduleJson =
+            JsonParser.parseString(File(publishedDir, "app-$TEST_VERSION.module").readText())
+                .asJsonObject
+        val apiDeps = moduleVariantDependencies(moduleJson, "apiElements")
+        val runtimeDeps = moduleVariantDependencies(moduleJson, "runtimeElements")
+        assertThat(apiDeps).doesNotContain("com.example:ext-api:1.0.0")
+        assertThat(apiDeps).doesNotContain("com.example:ext-impl:1.0.0")
+        assertThat(runtimeDeps)
+            .containsAtLeast("com.example:ext-api:1.0.0", "com.example:ext-impl:1.0.0")
+        assertThat(runtimeDeps.none { it.contains("feature") }).isTrue()
+    }
+
+    @Test
     fun `nested embedApi promotes transitive API and runtime deps with exact scopes`() {
         val workspace = TestMetalavaWorkspace.create(tempFolder)
         workspace.publishExternalLibrary(
@@ -1455,7 +1666,7 @@ class ProjectEmbeddingTest {
     }
 
     @Test
-    fun `fail-fast guard rejects embedding an already-published project on jar and publish`() {
+    fun `fail-fast guard rejects embedding an already-published project on jar, publish, and startScripts`() {
         val workspace = TestMetalavaWorkspace.create(tempFolder)
         workspace.addSubproject(
             path = ":published-sibling",
@@ -1489,8 +1700,26 @@ class ProjectEmbeddingTest {
                 """
                     .trimIndent(),
         )
+        workspace.addSubproject(
+            path = ":app-host",
+            buildScript =
+                """
+                    plugins {
+                        id("application")
+                        id("metalava-build-plugin")
+                        id("maven-publish")
+                    }
+                    application {
+                        mainClass.set("com.example.apphost.Main")
+                    }
+                    dependencies {
+                        embedImplementation(project(":published-sibling"))
+                    }
+                """
+                    .trimIndent(),
+        )
 
-        // Both :jar and :publish must report the actionable custom error message.
+        // :jar, :publish, and :startScripts must all report the actionable custom error message.
         val jarResult = workspace.runAndFail(":host:jar")
         assertThat(jarResult.output)
             .contains("Cannot embed project ':published-sibling' in ':host'")
@@ -1500,6 +1729,11 @@ class ProjectEmbeddingTest {
         assertThat(publishResult.output)
             .contains("Cannot embed project ':published-sibling' in ':host'")
         assertThat(publishResult.output).contains("maven-publish")
+
+        val startScriptsResult = workspace.runAndFail(":app-host:startScripts")
+        assertThat(startScriptsResult.output)
+            .contains("Cannot embed project ':published-sibling' in ':app-host'")
+        assertThat(startScriptsResult.output).contains("maven-publish")
     }
 
     @Test
@@ -1648,10 +1882,13 @@ class ProjectEmbeddingTest {
             buildScript =
                 """
                     plugins {
-                        `java-library`
+                        id("application")
                         id("org.jetbrains.kotlin.jvm")
                         id("maven-publish")
                         id("metalava-build-plugin")
+                    }
+                    application {
+                        mainClass.set("com.example.host.Main")
                     }
                     dependencies {
                         embedImplementation(project(":embedded"))
@@ -1665,33 +1902,39 @@ class ProjectEmbeddingTest {
                 ),
         )
 
-        // First run populates both configuration cache and build cache.
-        val firstRun =
-            workspace.run(
+        val cachedArgs =
+            arrayOf(
                 ":host:jar",
+                ":host:installDist",
                 ":host:publish",
                 ":host:createBuildInfo",
                 "--configuration-cache",
                 "--build-cache",
             )
+
+        // First run populates both configuration cache and build cache.
+        val firstRun = workspace.run(*cachedArgs)
         assertThat(firstRun.output).contains("Configuration cache entry stored.")
 
         // Second run must reuse the configuration cache entry cleanly.
-        val secondRun =
-            workspace.run(
-                ":host:jar",
-                ":host:publish",
-                ":host:createBuildInfo",
-                "--configuration-cache",
-                "--build-cache",
-            )
+        val secondRun = workspace.run(*cachedArgs)
         assertThat(secondRun.output).contains("Configuration cache entry reused.")
 
-        // Delete build outputs and re-run to verify MergeServiceFilesTask is cacheable.
+        // Delete build outputs and re-run the full task list to verify MergeServiceFilesTask is
+        // served from the build cache AND the Configuration-Cache-restored installDist Sync still
+        // filters out the embedded JAR.
         workspace.outDir.deleteRecursively()
-        val cachedRun = workspace.run(":host:jar", "--configuration-cache", "--build-cache")
+        val cachedRun = workspace.run(*cachedArgs)
+        assertThat(cachedRun.output).contains("Configuration cache entry reused.")
         assertThat(cachedRun.task(":host:mergeServiceFiles")?.outcome)
             .isEqualTo(TaskOutcome.FROM_CACHE)
+        val libFiles =
+            File(workspace.outDir, "metalava/host/build/install/host/lib")
+                .listFiles()
+                ?.map { it.name }
+                .orEmpty()
+        assertThat(libFiles).contains("host-$TEST_VERSION.jar")
+        assertThat(libFiles.none { it.startsWith("embedded-") }).isTrue()
     }
 
     /** Extracts comma-separated values from a line starting with [prefix] in [output]. */
