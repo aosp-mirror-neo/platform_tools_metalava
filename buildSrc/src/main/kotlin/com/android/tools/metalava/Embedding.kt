@@ -16,24 +16,36 @@
 
 package com.android.tools.metalava
 
+import com.android.tools.metalava.buildinfo.setBuildInfoAttributes
 import java.nio.file.Path
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
+import org.gradle.api.artifacts.DependencySet
+import org.gradle.api.artifacts.ExcludeRule
+import org.gradle.api.artifacts.ModuleDependency
 import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.artifacts.component.ComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentSelector
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+import org.gradle.api.attributes.Bundling
 import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.LibraryElements
+import org.gradle.api.attributes.Usage
+import org.gradle.api.attributes.java.TargetJvmEnvironment
+import org.gradle.api.attributes.java.TargetJvmVersion
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.plugins.JavaLibraryPlugin
 import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.bundling.Jar
+import org.gradle.kotlin.dsl.exclude
 import org.gradle.kotlin.dsl.named
 
 /** Declarable configuration for embedding a local subproject's API into a `java-library` host. */
@@ -48,6 +60,24 @@ internal const val EMBED_ELEMENTS_CONFIGURATION = "embedElements"
 /** Resolvable configuration traversing only the transitive embedded project cluster. */
 private const val EMBED_CLUSTER_CONFIGURATION = "embedCluster"
 
+/** Resolvable configuration capturing `JAVA_API` dependencies of `embedApi` projects. */
+private const val EMBED_API_RESOLVABLE_CONFIGURATION = "embedApiResolvable"
+
+/** Resolvable configuration capturing `JAVA_RUNTIME` dependencies of embedded projects. */
+private const val EMBED_RUNTIME_RESOLVABLE_CONFIGURATION = "embedRuntimeResolvable"
+
+/**
+ * Internal declarable configuration extended by `apiElements` to hold promoted API boundary
+ * dependencies (Gradle 9 forbids declaring dependencies directly on consumable `apiElements`).
+ */
+private const val EMBED_PROMOTED_API_CONFIGURATION = "embedPromotedApi"
+
+/**
+ * Internal declarable configuration extended by `runtimeElements` to hold promoted runtime boundary
+ * dependencies (Gradle 9 forbids declaring dependencies directly on consumable `runtimeElements`).
+ */
+private const val EMBED_PROMOTED_RUNTIME_CONFIGURATION = "embedPromotedRuntime"
+
 /** Gradle [Category] attribute value identifying raw embeddable project outputs. */
 private const val METALAVA_EMBED_CATEGORY = "metalava-embed"
 
@@ -55,8 +85,9 @@ private const val METALAVA_EMBED_CATEGORY = "metalava-embed"
 private const val MERGE_SERVICE_FILES_TASK = "mergeServiceFiles"
 
 /**
- * Local resolvable classpath configurations that receive embedded project dependencies (including
- * `java-test-fixtures` classpaths when `JavaTestFixturesPlugin` is applied in any order).
+ * Local classpath configurations on a host project that must see embedded subprojects directly
+ * without leaking them into outgoing published variants (`apiElements`, `runtimeElements`,
+ * `testFixturesApiElements`, `testFixturesRuntimeElements`).
  */
 private val LOCAL_EMBED_CLASSPATH_CONFIGS =
     setOf(
@@ -69,14 +100,19 @@ private val LOCAL_EMBED_CLASSPATH_CONFIGS =
     )
 
 /**
- * Configures core Gradle project embedding support (`embedApi` and `embedImplementation`) on
- * [project].
+ * Configures Gradle project embedding support (`embedApi` and `embedImplementation`) on [project].
  *
  * Unpublished subprojects (those without `maven-publish`) expose an `embedElements` variant
  * containing only their own compiled classes and processed resources. Host projects declare
- * `embedApi(project(...))` (on `java-library` projects) or `embedImplementation(project(...))` to
- * merge the transitive embedded cluster's classes, Kotlin `.kotlin_module` metadata, resources, and
- * deterministically merged `META-INF/services/` entries into the host's `jar`.
+ * `embedApi(project(...))` (on `java-library` projects) or `embedImplementation(project(...))` to:
+ * - Merge the transitive embedded cluster's classes, Kotlin `.kotlin_module` metadata, resources,
+ *   and deterministically merged `META-INF/services/` entries into the host's `jar`.
+ * - Exclude embedded projects from published `.pom`, `.module`, and `build_info.txt` metadata while
+ *   promoting all non-embedded boundary dependencies (including `platform(...)` BOMs) with the
+ *   appropriate scope. Note: because Gradle's `ResolutionResult` does not expose per-dependency
+ *   `ExcludeRule`s on transitive edges, any `exclude(...)` rule for an embedded project's external
+ *   boundary dependency must be declared on the host project (where it is preserved across
+ *   promotion).
  */
 internal fun configureEmbedding(project: Project) {
     project.plugins.withType(JavaPlugin::class.java) {
@@ -96,6 +132,12 @@ internal fun configureEmbedding(project: Project) {
                 }
             }
 
+        val embedRuntimeResolvable =
+            project.configurations.resolvable(EMBED_RUNTIME_RESOLVABLE_CONFIGURATION) { config ->
+                config.extendsFrom(embedImplementation.get())
+                configureJvmResolutionAttributes(project, config, Usage.JAVA_RUNTIME)
+            }
+
         // Make embedded implementation projects visible to the host's own compilation, runtime,
         // unit tests, and (when java-test-fixtures is applied, in any order) testFixtures without
         // leaking them into outgoing published variants. Using configurations.matching avoids
@@ -103,6 +145,34 @@ internal fun configureEmbedding(project: Project) {
         project.configurations
             .matching { it.name in LOCAL_EMBED_CLASSPATH_CONFIGS }
             .configureEach { config -> config.extendsFrom(embedImplementation.get()) }
+
+        // Promote non-embedded runtime boundary dependencies of all embedded projects into
+        // runtimeElements via a declarable dependencyScope (Gradle 9 forbids adding dependencies
+        // directly to consumable configurations such as runtimeElements).
+        val embedPromotedRuntime =
+            project.configurations.dependencyScope(EMBED_PROMOTED_RUNTIME_CONFIGURATION)
+        val runtimeElements = project.configurations.named("runtimeElements")
+        runtimeElements.configure { it.extendsFrom(embedPromotedRuntime.get()) }
+        embedPromotedRuntime.configure { promoted ->
+            promoted.withDependencies { targetDeps ->
+                val embedApi = project.configurations.findByName(EMBED_API_CONFIGURATION)
+                val hasEmbedApi = embedApi?.dependencies?.isNotEmpty() == true
+                val hasEmbedImpl = embedImplementation.get().dependencies.isNotEmpty()
+                if (!hasEmbedApi && !hasEmbedImpl) {
+                    return@withDependencies
+                }
+                promoteBoundaryDependencies(
+                    project = project,
+                    embedApi = embedApi,
+                    embedImplementation = embedImplementation.get(),
+                    embedCluster = embedCluster.get(),
+                    resolvableConfig = embedRuntimeResolvable.get(),
+                    targetOutgoingConfig = runtimeElements.get(),
+                    promotedScope = promoted,
+                    targetDeps = targetDeps,
+                )
+            }
+        }
 
         // Wait until the subproject's build script finishes evaluating so maven-publish and any
         // embedApi/embedImplementation dependencies have been declared before wiring variants and
@@ -134,8 +204,8 @@ internal fun configureEmbedding(project: Project) {
                     apiElements.outgoing.variants.removeIf { it.name == "classes" }
                 }
             }
-            project.configurations.named("runtimeElements").configure { runtimeElements ->
-                runtimeElements.outgoing.variants.removeIf {
+            runtimeElements.configure { runtime ->
+                runtime.outgoing.variants.removeIf {
                     it.name == "classes" || it.name == "resources"
                 }
             }
@@ -144,17 +214,82 @@ internal fun configureEmbedding(project: Project) {
         }
     }
 
-    // JavaLibraryPlugin always applies JavaPlugin first, so embedImplementation and embedCluster
-    // are already registered when this callback runs.
+    // JavaLibraryPlugin always applies JavaPlugin first, so embedImplementation, embedCluster,
+    // and embedRuntimeResolvable are already registered when this callback runs.
     project.plugins.withType(JavaLibraryPlugin::class.java) {
         val embedApi = project.configurations.dependencyScope(EMBED_API_CONFIGURATION)
+        val embedImplementation = project.configurations.named(EMBED_IMPLEMENTATION_CONFIGURATION)
         val embedCluster = project.configurations.named(EMBED_CLUSTER_CONFIGURATION)
+        val embedRuntimeResolvable =
+            project.configurations.named(EMBED_RUNTIME_RESOLVABLE_CONFIGURATION)
+
+        val embedApiResolvable =
+            project.configurations.resolvable(EMBED_API_RESOLVABLE_CONFIGURATION) { config ->
+                config.extendsFrom(embedApi.get())
+                configureJvmResolutionAttributes(project, config, Usage.JAVA_API)
+            }
 
         embedCluster.configure { it.extendsFrom(embedApi.get()) }
+        embedRuntimeResolvable.configure { it.extendsFrom(embedApi.get()) }
 
         project.configurations
             .matching { it.name in LOCAL_EMBED_CLASSPATH_CONFIGS }
             .configureEach { config -> config.extendsFrom(embedApi.get()) }
+
+        // Promote non-embedded API boundary dependencies of embedApi projects into apiElements
+        // via a declarable dependencyScope.
+        val embedPromotedApi =
+            project.configurations.dependencyScope(EMBED_PROMOTED_API_CONFIGURATION)
+        val apiElements = project.configurations.named("apiElements")
+        apiElements.configure { it.extendsFrom(embedPromotedApi.get()) }
+        embedPromotedApi.configure { promoted ->
+            promoted.withDependencies { targetDeps ->
+                if (embedApi.get().dependencies.isEmpty()) {
+                    return@withDependencies
+                }
+                promoteBoundaryDependencies(
+                    project = project,
+                    embedApi = embedApi.get(),
+                    embedImplementation = embedImplementation.get(),
+                    embedCluster = embedCluster.get(),
+                    resolvableConfig = embedApiResolvable.get(),
+                    targetOutgoingConfig = apiElements.get(),
+                    promotedScope = promoted,
+                    targetDeps = targetDeps,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Configures standard JVM library resolution attributes on [config] for [usageName] (`JAVA_API` or
+ * `JAVA_RUNTIME`) so Kotlin Multiplatform and Guava dependencies disambiguate cleanly.
+ */
+internal fun configureJvmResolutionAttributes(
+    project: Project,
+    config: Configuration,
+    usageName: String,
+    targetJvmVersion: Int =
+        project.extensions
+            .getByType(JavaPluginExtension::class.java)
+            .targetCompatibility
+            .majorVersion
+            .toInt(),
+) {
+    config.attributes { attrs ->
+        attrs.attribute(Usage.USAGE_ATTRIBUTE, project.objects.named(usageName))
+        attrs.attribute(Category.CATEGORY_ATTRIBUTE, project.objects.named(Category.LIBRARY))
+        attrs.attribute(Bundling.BUNDLING_ATTRIBUTE, project.objects.named(Bundling.EXTERNAL))
+        attrs.attribute(
+            LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+            project.objects.named(LibraryElements.JAR),
+        )
+        attrs.attribute(
+            TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+            project.objects.named(TargetJvmEnvironment.STANDARD_JVM),
+        )
+        attrs.attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, targetJvmVersion)
     }
 }
 
@@ -291,6 +426,258 @@ private fun collectEmbeddedProjectPaths(root: ResolvedComponentResult): Set<Stri
 }
 
 /**
+ * Promotes non-embedded boundary dependencies of the embedded cluster from [resolvableConfig] into
+ * [targetDeps] of [targetOutgoingConfig].
+ *
+ * Dependencies inside the embedded cluster are traversed recursively and never promoted; external
+ * modules and published sibling projects at the boundary are added once (unless already declared on
+ * [targetOutgoingConfig] or its parent configurations, preserving explicit host exclusions). On
+ * published hosts, any boundary project that does not apply `maven-publish` fails the build fast.
+ */
+private fun promoteBoundaryDependencies(
+    project: Project,
+    embedApi: Configuration?,
+    embedImplementation: Configuration,
+    embedCluster: Configuration,
+    resolvableConfig: Configuration,
+    targetOutgoingConfig: Configuration,
+    promotedScope: Configuration,
+    targetDeps: DependencySet,
+) {
+    validateEmbedDeclarations(project, embedApi, embedImplementation)
+
+    val embeddedPaths = resolveEmbeddedClusterPaths(project, embedCluster)
+    if (embeddedPaths.isEmpty()) {
+        return
+    }
+
+    // Resolve the JVM API/runtime graph separately from embedCluster so traversal crosses normal
+    // api/implementation edges out of the embedded cluster to discover external modules and
+    // published sibling projects at the boundary.
+    val resolutionResult = resolvableConfig.incoming.resolutionResult
+    for (dep in resolutionResult.allDependencies) {
+        if (dep is UnresolvedDependencyResult) {
+            throw GradleException(
+                "Failed to resolve embedded dependencies for '${project.path}' in " +
+                    "'${resolvableConfig.name}': ${dep.requested.displayName}",
+                dep.failure,
+            )
+        }
+    }
+
+    // Gather existing project and module coordinates declared on sibling parent configurations of
+    // targetOutgoingConfig (such as api, implementation, runtimeOnly) and targetDeps, excluding
+    // promotedScope itself to avoid re-entering its withDependencies callback. Track declared
+    // versions so we can emit a dependency constraint when an embedded project requires a different
+    // version without duplicating the host dependency or stripping host excludes.
+    val existingProjectPaths = hashSetOf<String>()
+    val existingModuleVersions = hashMapOf<Pair<String?, String>, MutableSet<String?>>()
+    val inheritedConfigs =
+        collectInheritedConfigurations(targetOutgoingConfig, exclude = promotedScope)
+    for (dep in inheritedConfigs.flatMap { it.allDependencies } + targetDeps) {
+        if (dep is ProjectDependency) {
+            existingProjectPaths.add(dep.path)
+        } else {
+            existingModuleVersions
+                .getOrPut(dep.group to dep.name) { linkedSetOf() }
+                .add(dep.version)
+        }
+    }
+
+    // When promoting into apiElements, collect per-module exclude rules from the host's
+    // implementation configuration so a host declaring implementation("g:m:v") { exclude(...) }
+    // alongside embedApi(project(...)) does not leak excluded transitives into apiElements or
+    // drop <exclusions> from the merged compile-scoped POM entry.
+    val hostImplExcludesByModule = linkedMapOf<Pair<String?, String>, MutableSet<ExcludeRule>>()
+    if (targetOutgoingConfig.name == "apiElements") {
+        val hostImpl = project.configurations.findByName("implementation")
+        if (hostImpl != null) {
+            for (dep in hostImpl.allDependencies) {
+                if (dep is ModuleDependency && dep.excludeRules.isNotEmpty()) {
+                    hostImplExcludesByModule
+                        .getOrPut(dep.group to dep.name) { linkedSetOf() }
+                        .addAll(dep.excludeRules)
+                }
+            }
+        }
+    }
+
+    val isPublishedHost = project.plugins.hasPlugin(MavenPublishPlugin::class.java)
+    val publishedCheckCache = hashMapOf<String, Boolean>()
+
+    val root = resolutionResult.rootComponent.get()
+    val visited = hashSetOf<ComponentIdentifier>()
+    val promotedIds = hashSetOf<ComponentIdentifier>()
+    val queue = ArrayDeque<Pair<ResolvedComponentResult, String>>()
+
+    // Seed the walk exclusively with direct edges entering embeddedPaths so we only inspect
+    // dependencies originating inside the embedded cluster, never the host's own direct deps.
+    for (edge in root.dependencies) {
+        if (edge is ResolvedDependencyResult && !edge.isConstraint) {
+            val target = edge.selected
+            val targetId = target.id
+            if (targetId is ProjectComponentIdentifier && targetId.projectPath in embeddedPaths) {
+                if (visited.add(targetId)) {
+                    queue.add(target to targetId.projectPath)
+                }
+            }
+        }
+    }
+
+    while (queue.isNotEmpty()) {
+        val (node, currentEmbeddedPath) = queue.removeFirst()
+        for (edge in node.dependencies) {
+            if (edge !is ResolvedDependencyResult || edge.isConstraint) {
+                continue
+            }
+            val target = edge.selected
+            val targetId = target.id
+            if (targetId == root.id) {
+                continue
+            }
+
+            // Stay inside the embedded cluster without promoting the project itself, since its
+            // compiled outputs are merged into the host JAR while its outgoing edges may cross the
+            // boundary.
+            if (targetId is ProjectComponentIdentifier && targetId.projectPath in embeddedPaths) {
+                if (visited.add(targetId)) {
+                    queue.add(target to targetId.projectPath)
+                }
+                continue
+            }
+
+            // Boundary dependency: promote once and stop traversal because the boundary artifact's
+            // own metadata already declares its transitive dependencies.
+            if (!promotedIds.add(targetId)) {
+                continue
+            }
+
+            when (targetId) {
+                is ProjectComponentIdentifier -> {
+                    // Only enforce the unpublished-sibling guard on published hosts; an unpublished
+                    // intermediate project may legitimately depend on a sibling that an outer
+                    // published host embeds.
+                    if (isPublishedHost) {
+                        val isTargetPublished =
+                            publishedCheckCache.getOrPut(targetId.projectPath) {
+                                isPublishedMetalavaProject(project, targetId.projectPath)
+                            }
+                        if (!isTargetPublished) {
+                            throw GradleException(
+                                "Embedded project '$currentEmbeddedPath' depends on unpublished " +
+                                    "project '${targetId.projectPath}', which is not embedded by " +
+                                    "'${project.path}'. Add " +
+                                    "$EMBED_IMPLEMENTATION_CONFIGURATION(project(\"${targetId.projectPath}\")) " +
+                                    "(or $EMBED_API_CONFIGURATION) to '${project.path}' or apply " +
+                                    "'maven-publish' to '${targetId.projectPath}'."
+                            )
+                        }
+                    }
+
+                    // Skip coordinates already declared directly on the host to preserve any
+                    // explicit host dependency configuration or exclude rules.
+                    if (targetId.projectPath !in existingProjectPaths) {
+                        targetDeps.add(
+                            project.dependencies.project(mapOf("path" to targetId.projectPath))
+                        )
+                        existingProjectPaths.add(targetId.projectPath)
+                    }
+                }
+                is ModuleComponentIdentifier -> {
+                    // Preserve explicit host module declarations (including exclude(...) rules)
+                    // rather than adding an unexcluded duplicate that would re-introduce excluded
+                    // transitive artifacts. Preserve platform/enforced-platform categories for BOMs
+                    // so downstream consumers do not attempt to resolve a JAR for a POM-only BOM.
+                    val key = targetId.group to targetId.module
+                    val coord = "${targetId.group}:${targetId.module}:${targetId.version}"
+                    val category = edge.resolvedCategory()
+                    val isPlatform =
+                        category == Category.REGULAR_PLATFORM ||
+                            category == Category.ENFORCED_PLATFORM
+                    val declaredVersions = existingModuleVersions[key]
+                    if (declaredVersions == null) {
+                        val promotedDep =
+                            when (category) {
+                                Category.REGULAR_PLATFORM -> project.dependencies.platform(coord)
+                                Category.ENFORCED_PLATFORM ->
+                                    project.dependencies.enforcedPlatform(coord)
+                                else -> project.dependencies.create(coord)
+                            }
+                        if (!isPlatform && promotedDep is ModuleDependency) {
+                            for (rule in hostImplExcludesByModule[key].orEmpty()) {
+                                promotedDep.exclude(group = rule.group, module = rule.module)
+                            }
+                        }
+                        targetDeps.add(promotedDep)
+                        existingModuleVersions[key] = linkedSetOf(targetId.version)
+                    } else if (!isPlatform && declaredVersions != setOf(targetId.version)) {
+                        // When the host already declares this module at a different version, add a
+                        // dependency constraint on promotedScope so outgoing metadata reflects the
+                        // embedded module's required version without duplicating the dependency or
+                        // stripping host excludes.
+                        promotedScope.dependencyConstraints.add(
+                            project.dependencies.constraints.create(coord)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Returns all ancestor configurations extended by [configuration] without including [configuration]
+ * itself or [exclude].
+ */
+private fun collectInheritedConfigurations(
+    configuration: Configuration,
+    exclude: Configuration,
+): Set<Configuration> {
+    val result = linkedSetOf<Configuration>()
+    val queue = ArrayDeque(configuration.extendsFrom)
+    while (queue.isNotEmpty()) {
+        val current = queue.removeFirst()
+        if (current != exclude && result.add(current)) {
+            queue.addAll(current.extendsFrom)
+        }
+    }
+    return result
+}
+
+/**
+ * Checks whether [projectPath] is a published Metalava project in a Project-Isolation-safe way by
+ * resolving its `buildInfoProvider` (`Category = build-info`) variant, which is registered only
+ * when `maven-publish` is applied.
+ */
+private fun isPublishedMetalavaProject(project: Project, projectPath: String): Boolean {
+    // Probe the target project's build-info variant via variant-aware resolution rather than
+    // looking up Project instances on rootProject so this stays Project-Isolation-safe. Verify the
+    // selected variant explicitly carries org.gradle.category = "build-info" so an attribute-less
+    // legacy consumable configuration (such as modelTestSuite) cannot cause a false positive.
+    val checkConfig =
+        project.configurations.detachedConfiguration(
+            project.dependencies.project(mapOf("path" to projectPath))
+        )
+    checkConfig.isTransitive = false
+    checkConfig.attributes.setBuildInfoAttributes(project)
+    val deps = checkConfig.incoming.resolutionResult.allDependencies
+    return deps.isNotEmpty() &&
+        deps.all { dep ->
+            dep is ResolvedDependencyResult && dep.resolvedCategory() == "build-info"
+        }
+}
+
+/**
+ * Returns the string value of `org.gradle.category` on this resolved dependency's selected variant,
+ * or `null` if the selected variant omits the category attribute.
+ */
+private fun ResolvedDependencyResult.resolvedCategory(): String? {
+    val attrs = resolvedVariant.attributes
+    val categoryAttr = attrs.keySet().firstOrNull { it.name == Category.CATEGORY_ATTRIBUTE.name }
+    return categoryAttr?.let { attrs.getAttribute(it)?.toString() }
+}
+
+/**
  * Registers [MergeServiceFilesTask] and updates the host `jar` task to merge all embedded project
  * outputs and deterministically merged `META-INF/services/` entries while failing on any other
  * duplicate entry.
@@ -299,9 +686,9 @@ private fun configureMergedJar(project: Project, embedCluster: Configuration) {
     val mainOutput =
         project.extensions.getByType(SourceSetContainer::class.java).named("main").get().output
 
-    // Validate embedCluster before Gradle attempts default artifact resolution so :jar and
-    // :mergeServiceFiles emit an actionable error message when an embedded project lacks
-    // embedElements (e.g. applies maven-publish).
+    // Validate embedCluster before Gradle attempts default artifact resolution so :jar,
+    // :mergeServiceFiles, and :installDist emit the same actionable error message as :publish
+    // when an embedded project lacks embedElements (e.g. applies maven-publish).
     val validatedEmbedFiles =
         project.provider {
             resolveEmbeddedClusterPaths(project, embedCluster)
