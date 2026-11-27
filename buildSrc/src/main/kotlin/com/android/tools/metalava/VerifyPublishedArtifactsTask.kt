@@ -19,8 +19,14 @@ package com.android.tools.metalava
 import com.android.tools.metalava.buildinfo.CreateAggregateLibraryBuildInfoFileTask.Companion.CREATE_AGGREGATE_BUILD_INFO_FILES_TASK
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.URLClassLoader
+import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.ServiceLoader
+import java.util.spi.ToolProvider
+import javax.inject.Inject
 import javax.xml.parsers.DocumentBuilderFactory
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
@@ -31,19 +37,26 @@ import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.gradle.api.attributes.Category
 import org.gradle.api.attributes.Usage
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.model.ObjectFactory
 import org.gradle.api.plugins.JvmEcosystemPlugin
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 import org.w3c.dom.Element
 
@@ -52,21 +65,36 @@ const val VERIFY_PUBLISHED_ARTIFACTS_TASK = "verifyPublishedArtifacts"
 
 /**
  * Verifies the published Metalava Maven repository (`out/dist/repo/m2repository`) and aggregate
- * build-info file (`androidx_aggregate_build_info.txt`) strictly from published outputs without
- * Gradle project substitutions.
+ * build-info file (`androidx_aggregate_build_info.txt`), loading all Metalava JARs strictly from
+ * [m2RepositoryDirectory] without Gradle project substitutions while resolving external JARs from
+ * Gradle's external-only runtime view.
  *
  * Specifically, this task checks that:
  * 1. Every published subproject exists in `m2repository` at [metalavaVersion] with valid `.jar`,
- *    `.pom`, `.module`, required JVM variants (`apiElements`, `runtimeElements`), and matching
- *    SHA-256 checksums, while no unpublished or stale Metalava subproject is present at
- *    [metalavaVersion].
+ *    `.pom`, `.module`, and matching SHA-256 checksums, while no unpublished subproject is
+ *    published at [metalavaVersion].
  * 2. No unpublished (including embedded) Metalava coordinate appears in any `.pom`, `.module`, or
  *    `androidx_aggregate_build_info.txt`, and `.pom`, `.module`, and build-info metadata agree on
- *    all Metalava and external dependencies, versions, scopes, BOM imports, exclusions, and
- *    `isTipOfTree` flags.
+ *    all Metalava and external dependencies, scopes, and `isTipOfTree` flags.
+ * 3. Every published artifact's `.module`-resolved external runtime dependency closure matches its
+ *    expected non-embedded `runtimeClasspath` external coordinates (catching both omitted promoted
+ *    dependencies and missing `exclude` rules such as `lint-checks`).
+ * 4. Loading [modelSmokeCheckClasses] from the published [modelArtifactId] runtime classpath in an
+ *    isolated [URLClassLoader] succeeds with code sources strictly inside [m2RepositoryDirectory].
+ * 5. Executing [cliMainClass] with [cliArgs] on the published [cliArtifactId] runtime classpath
+ *    succeeds with output containing [expectedCliOutputSubstring], and `ServiceLoader` discovers
+ *    [expectedToolProviderName] when configured.
  */
 @DisableCachingByDefault(because = "Verifies published artifacts in the shared dist directory")
 abstract class VerifyPublishedArtifactsTask : DefaultTask() {
+
+    /** Process execution service used to launch the published CLI smoke check in a fresh JVM. */
+    @get:Inject abstract val execOperations: ExecOperations
+
+    /**
+     * Object factory for creating execution-time file collections without referencing `project`.
+     */
+    @get:Inject abstract val objects: ObjectFactory
 
     /** Root directory of the local published Maven repository (`.../repo/m2repository`). */
     @get:Internal abstract val m2RepositoryDirectory: DirectoryProperty
@@ -85,9 +113,12 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
     /** Coordinates (`group:name`) of unpublished subprojects that must never be published. */
     @get:Input abstract val unpublishedCoordinates: SetProperty<String>
 
+    /** Resolved external (non-project) runtime JAR files available to published artifacts. */
+    @get:InputFiles @get:Classpath abstract val externalArtifactFiles: ConfigurableFileCollection
+
     /**
      * Maps each external `"group:module"` coordinate to its resolved `"filename:byteLength"` keys
-     * from the external runtime artifact view.
+     * in [externalArtifactFiles].
      */
     @get:Input abstract val externalCoordinateToFileKeys: MapProperty<String, Set<String>>
 
@@ -100,10 +131,38 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
      */
     @get:Input abstract val externalCoordinateToVersion: MapProperty<String, String>
 
+    /**
+     * Maps each published artifact ID to the set of external `"group:module"` coordinates resolved
+     * by its local `runtimeClasspath` (the ground-truth runtime graph including embedded projects'
+     * transitive dependencies and `exclude` rules).
+     */
+    @get:Input abstract val expectedRuntimeExternalCoordinates: MapProperty<String, Set<String>>
+
+    /** Published model artifact ID to verify via isolated classloading (optional). */
+    @get:Input @get:Optional abstract val modelArtifactId: Property<String>
+
+    /** Fully qualified class names to load and inspect from the published [modelArtifactId] JAR. */
+    @get:Input abstract val modelSmokeCheckClasses: ListProperty<String>
+
+    /** Published CLI artifact ID to verify via `javaexec` and `ToolProvider` (optional). */
+    @get:Input @get:Optional abstract val cliArtifactId: Property<String>
+
+    /** Main class to execute for the published CLI smoke check. */
+    @get:Input @get:Optional abstract val cliMainClass: Property<String>
+
+    /** Command-line arguments passed to [cliMainClass]. */
+    @get:Input abstract val cliArgs: ListProperty<String>
+
+    /** Expected substring in stdout from running [cliMainClass] with [cliArgs]. */
+    @get:Input @get:Optional abstract val expectedCliOutputSubstring: Property<String>
+
+    /** Expected `ToolProvider.name()` discoverable from the published [cliArtifactId] classpath. */
+    @get:Input @get:Optional abstract val expectedToolProviderName: Property<String>
+
     /** Whether IntelliJ Gradle sync (`-Didea.sync.active=true`) is active for this build. */
     @get:Input abstract val ideaSyncActive: Property<Boolean>
 
-    /** Runs all published repository, checksum, `.module`, `.pom`, and build-info checks. */
+    /** Runs all metadata, dependency-resolution, classloading, and CLI smoke checks. */
     @TaskAction
     fun verify() {
         if (ideaSyncActive.get()) {
@@ -120,6 +179,41 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
         val coordToFileKeys = externalCoordinateToFileKeys.get()
         val externalGraph = externalTransitiveGraph.get()
         val externalCoordToVersion = externalCoordinateToVersion.get()
+        val expectedExternalByArtifact = expectedRuntimeExternalCoordinates.get()
+
+        // Validate optional smoke-check property pairs upfront so partial configuration (for
+        // example, modelSmokeCheckClasses without modelArtifactId) fails fast instead of silently
+        // skipping verification.
+        val modelId = modelArtifactId.orNull?.takeIf { it.isNotEmpty() }
+        val classesToLoad = modelSmokeCheckClasses.get()
+        if (classesToLoad.isNotEmpty() && modelId == null) {
+            throw GradleException("modelSmokeCheckClasses was configured without modelArtifactId.")
+        }
+        if (modelId != null && classesToLoad.isEmpty()) {
+            throw GradleException(
+                "modelArtifactId '$modelId' was configured without modelSmokeCheckClasses."
+            )
+        }
+
+        val cliId = cliArtifactId.orNull?.takeIf { it.isNotEmpty() }
+        val toolProviderName = expectedToolProviderName.orNull?.takeIf { it.isNotEmpty() }
+        val mainClass = cliMainClass.orNull?.takeIf { it.isNotEmpty() }
+        val expectedOutput = expectedCliOutputSubstring.orNull?.takeIf { it.isNotEmpty() }
+        if ((toolProviderName != null || mainClass != null) && cliId == null) {
+            throw GradleException(
+                "CLI smoke check (cliMainClass / expectedToolProviderName) was configured " +
+                    "without cliArtifactId."
+            )
+        }
+        if (cliId != null && toolProviderName == null && mainClass == null) {
+            throw GradleException(
+                "cliArtifactId '$cliId' was configured without cliMainClass or " +
+                    "expectedToolProviderName."
+            )
+        }
+        if (expectedOutput != null && mainClass == null) {
+            throw GradleException("expectedCliOutputSubstring was configured without cliMainClass.")
+        }
 
         if (!m2Repo.isDirectory) {
             throw GradleException(
@@ -130,6 +224,15 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
             throw GradleException(
                 "No published Metalava artifacts were registered for verification."
             )
+        }
+
+        // Index external JAR files by "filename:length" so lookups are independent of absolute
+        // checkout or cache paths.
+        val externalFilesByKey = hashMapOf<String, File>()
+        for (file in externalArtifactFiles.files) {
+            if (file.isFile) {
+                externalFilesByKey["${file.name}:${file.length()}"] = file
+            }
         }
 
         // 1. Ensure no unpublished or stale artifact was published at the current version.
@@ -215,6 +318,73 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
             unpublished = unpublished,
             parsedModules = parsedModules,
         )
+
+        // 4. Resolve each published artifact's runtime classpath strictly from m2repository
+        // .module files and verify its external dependency closure matches its expected
+        // non-embedded runtimeClasspath.
+        val resolvedClasspaths = linkedMapOf<String, List<File>>()
+        for (artifactId in published.sorted()) {
+            val resolved =
+                resolvePublishedRuntimeClasspath(
+                    rootArtifactId = artifactId,
+                    m2Repo = m2Repo,
+                    version = version,
+                    parsedModules = parsedModules,
+                    externalGraph = externalGraph,
+                    coordToFileKeys = coordToFileKeys,
+                    externalFilesByKey = externalFilesByKey,
+                )
+            resolvedClasspaths[artifactId] = resolved.classpath
+
+            val expectedCoords =
+                expectedExternalByArtifact[artifactId]
+                    ?: throw GradleException(
+                        "Missing expectedRuntimeExternalCoordinates for published artifact " +
+                            "'$artifactId'."
+                    )
+            val missing = (expectedCoords - resolved.externalCoords).sorted()
+            val unexpected = (resolved.externalCoords - expectedCoords).sorted()
+            if (missing.isNotEmpty() || unexpected.isNotEmpty()) {
+                throw GradleException(
+                    "Published runtime external dependencies for '$artifactId' do not match " +
+                        "its expected runtimeClasspath. Missing: $missing, unexpected: $unexpected."
+                )
+            }
+        }
+
+        // 5. Smoke-check the published model artifact in an isolated URLClassLoader.
+        if (modelId != null && classesToLoad.isNotEmpty()) {
+            val modelClasspath =
+                resolvedClasspaths[modelId]
+                    ?: throw GradleException(
+                        "Configured modelArtifactId '$modelId' was not found in published " +
+                            "artifacts (${published.sorted()})"
+                    )
+            verifyModelClasses(m2Repo, modelId, modelClasspath, classesToLoad)
+        }
+
+        // 6. Smoke-check the published CLI artifact via ToolProvider and javaexec.
+        if (cliId != null) {
+            val cliClasspath =
+                resolvedClasspaths[cliId]
+                    ?: throw GradleException(
+                        "Configured cliArtifactId '$cliId' was not found in published artifacts " +
+                            "(${published.sorted()})"
+                    )
+
+            if (toolProviderName != null) {
+                verifyToolProvider(m2Repo, cliId, cliClasspath, toolProviderName)
+            }
+
+            if (mainClass != null) {
+                verifyCliExecution(
+                    cliClasspath = cliClasspath,
+                    mainClass = mainClass,
+                    args = cliArgs.get(),
+                    expectedOutput = expectedOutput,
+                )
+            }
+        }
     }
 
     /** Throws a [GradleException] if [file] does not exist as a regular file. */
@@ -670,9 +840,280 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
         }
     }
 
+    /**
+     * Resolves the runtime classpath and external coordinate set for [rootArtifactId] strictly by
+     * traversing published `.module` files inside [m2Repo] for Metalava artifacts and then
+     * traversing [externalGraph] from the declared external coordinates (honoring `.module`
+     * `excludes`).
+     */
+    private fun resolvePublishedRuntimeClasspath(
+        rootArtifactId: String,
+        m2Repo: File,
+        version: String,
+        parsedModules: Map<String, ParsedModuleMetadata>,
+        externalGraph: Map<String, Set<String>>,
+        coordToFileKeys: Map<String, Set<String>>,
+        externalFilesByKey: Map<String, File>,
+    ): ResolvedPublishedRuntime {
+        val classpath = linkedSetOf<File>()
+        val visitedMetalava = hashSetOf<Pair<String, Set<ModuleExclude>>>()
+        val metalavaQueue = ArrayDeque<Pair<String, Set<ModuleExclude>>>()
+        val externalRoots = mutableListOf<ModuleDependency>()
+
+        // Resolve local Metalava artifacts strictly from m2repository .module files (never from
+        // Gradle's project graph) so project substitutions cannot mask missing or mispublished
+        // JARs or metadata. Track active excludes per visited Metalava node so excludes declared on
+        // local project dependencies or configurations propagate transitively without letting an
+        // excluded diamond path shadow an unexcluded path.
+        metalavaQueue.add(rootArtifactId to emptySet())
+        while (metalavaQueue.isNotEmpty()) {
+            val state = metalavaQueue.removeFirst()
+            if (!visitedMetalava.add(state)) {
+                continue
+            }
+            val (currentId, activeExcludes) = state
+            val moduleMeta =
+                parsedModules[currentId]
+                    ?: throw GradleException(
+                        "Cannot resolve published Metalava artifact '$currentId' from m2repository"
+                    )
+            val runtimeVariant =
+                moduleMeta.variants["runtimeElements"]
+                    ?: throw GradleException(
+                        "Published .module for '$currentId' is missing 'runtimeElements' variant"
+                    )
+
+            val artifactDir = File(m2Repo, "$METALAVA_GROUP_PATH/$currentId/$version")
+            for (fileSpec in runtimeVariant.files) {
+                val jarFile = File(artifactDir, fileSpec.url)
+                requireExistingFile(jarFile, "published runtime JAR for '$currentId'")
+                classpath.add(jarFile)
+            }
+
+            for (dep in runtimeVariant.dependencies) {
+                val mergedExcludes = activeExcludes + dep.excludes
+                if (isExcluded(dep.group, dep.module, mergedExcludes.toList())) {
+                    continue
+                }
+                if (dep.group == METALAVA_GROUP) {
+                    metalavaQueue.add(dep.module to mergedExcludes)
+                } else {
+                    externalRoots.add(dep.copy(excludes = mergedExcludes.toList()))
+                }
+            }
+        }
+
+        // Traverse external dependencies per declared root so root-specific excludes (such as
+        // lint -> exclude lint-checks) are enforced accurately.
+        val resolvedExternalCoords = linkedSetOf<String>()
+        for (rootDep in externalRoots) {
+            val rootCoord = "${rootDep.group}:${rootDep.module}"
+            val visitedForRoot = hashSetOf<String>()
+            val queue = ArrayDeque<String>()
+            if (!isExcluded(rootDep.group, rootDep.module, rootDep.excludes)) {
+                queue.add(rootCoord)
+            }
+            while (queue.isNotEmpty()) {
+                val coord = queue.removeFirst()
+                if (!visitedForRoot.add(coord)) {
+                    continue
+                }
+                resolvedExternalCoords.add(coord)
+                for (childCoord in externalGraph[coord].orEmpty()) {
+                    val childGroup = childCoord.substringBefore(':')
+                    val childModule = childCoord.substringAfter(':')
+                    if (!isExcluded(childGroup, childModule, rootDep.excludes)) {
+                        queue.add(childCoord)
+                    }
+                }
+            }
+        }
+
+        for (coord in resolvedExternalCoords) {
+            val fileKeys = coordToFileKeys[coord]
+            if (fileKeys != null) {
+                for (key in fileKeys) {
+                    val file =
+                        externalFilesByKey[key]
+                            ?: throw GradleException(
+                                "External artifact file missing for '$coord' (key '$key')"
+                            )
+                    classpath.add(file)
+                }
+            } else if (coord !in externalGraph) {
+                // Coordinates present in externalGraph with no JAR files are valid non-JAR
+                // components such as BOM platforms (e.g. kotlinx-coroutines-bom) or KMP umbrella
+                // modules (e.g. androidx.tracing:tracing) whose child targets supply the JARs.
+                throw GradleException(
+                    "External coordinate '$coord' declared in published metadata for " +
+                        "'$rootArtifactId' could not be resolved."
+                )
+            }
+        }
+
+        return ResolvedPublishedRuntime(
+            classpath = classpath.toList(),
+            externalCoords = resolvedExternalCoords,
+        )
+    }
+
+    /** Loads [classesToLoad] from [classpath] and asserts every class comes from [m2Repo]. */
+    private fun verifyModelClasses(
+        m2Repo: File,
+        modelId: String,
+        classpath: List<File>,
+        classesToLoad: List<String>,
+    ) {
+        val m2RepoCanonical = m2Repo.canonicalFile.toPath()
+        val urls = classpath.map { it.toURI().toURL() }.toTypedArray()
+
+        // Use the platform classloader as parent so Gradle's build classpath and workspace classes
+        // cannot leak into the isolated check; every Metalava and third-party class must resolve
+        // strictly from the published classpath.
+        URLClassLoader(urls, ClassLoader.getPlatformClassLoader()).use { loader ->
+            for (className in classesToLoad) {
+                // Load with initialize = false to avoid running static initializers while still
+                // forcing class loading and member/supertype resolution below.
+                val loadedClass =
+                    try {
+                        Class.forName(className, false, loader)
+                    } catch (e: Throwable) {
+                        throw GradleException(
+                            "Failed to load smoke-check class '$className' from published " +
+                                "'$modelId' classpath",
+                            e,
+                        )
+                    }
+
+                // Force resolution of supertype/method signatures to catch missing embedded APIs
+                // or missing promoted compile/runtime dependencies.
+                try {
+                    loadedClass.declaredMethods
+                    loadedClass.interfaces
+                    loadedClass.superclass
+                } catch (e: Throwable) {
+                    throw GradleException(
+                        "Failed to resolve members/supertypes of '$className' from published " +
+                            "'$modelId' classpath",
+                        e,
+                    )
+                }
+
+                verifyLoadedClassFromM2Repo(
+                    loadedClass = loadedClass,
+                    expectedLoader = loader,
+                    m2RepoCanonical = m2RepoCanonical,
+                    description = "Smoke-check class '$className'",
+                )
+            }
+        }
+    }
+
+    /** Verifies `ServiceLoader` finds [expectedToolProviderName] from the published CLI JARs. */
+    private fun verifyToolProvider(
+        m2Repo: File,
+        cliId: String,
+        classpath: List<File>,
+        expectedToolProviderName: String,
+    ) {
+        val m2RepoCanonical = m2Repo.canonicalFile.toPath()
+        val urls = classpath.map { it.toURI().toURL() }.toTypedArray()
+        URLClassLoader(urls, ClassLoader.getPlatformClassLoader()).use { loader ->
+            val provider =
+                ServiceLoader.load(ToolProvider::class.java, loader).firstOrNull {
+                    it.name() == expectedToolProviderName
+                }
+                    ?: throw GradleException(
+                        "Published '$cliId' classpath did not provide ToolProvider named " +
+                            "'$expectedToolProviderName' via META-INF/services"
+                    )
+            verifyLoadedClassFromM2Repo(
+                loadedClass = provider.javaClass,
+                expectedLoader = loader,
+                m2RepoCanonical = m2RepoCanonical,
+                description = "ToolProvider '${provider.javaClass.name}'",
+            )
+        }
+    }
+
+    /**
+     * Asserts that [loadedClass] was defined directly by [expectedLoader] (not delegated to a
+     * bootstrap/platform module) and that its code source lies inside [m2RepoCanonical].
+     */
+    private fun verifyLoadedClassFromM2Repo(
+        loadedClass: Class<*>,
+        expectedLoader: ClassLoader,
+        m2RepoCanonical: Path,
+        description: String,
+    ) {
+        if (loadedClass.classLoader !== expectedLoader) {
+            throw GradleException(
+                "$description was loaded by '${loadedClass.classLoader}' instead of the " +
+                    "isolated published m2repository classloader"
+            )
+        }
+        val location =
+            loadedClass.protectionDomain?.codeSource?.location
+                ?: throw GradleException(
+                    "$description has no code source location (expected JAR inside " +
+                        "'$m2RepoCanonical')"
+                )
+        val codeSourceFile = File(location.toURI()).canonicalFile
+        if (!codeSourceFile.toPath().startsWith(m2RepoCanonical)) {
+            throw GradleException(
+                "$description was loaded from '${codeSourceFile.absolutePath}' instead of " +
+                    "published m2repository '$m2RepoCanonical'"
+            )
+        }
+    }
+
+    /** Executes [mainClass] with [args] in a fresh JVM using only [cliClasspath]. */
+    private fun verifyCliExecution(
+        cliClasspath: List<File>,
+        mainClass: String,
+        args: List<String>,
+        expectedOutput: String?,
+    ) {
+        val stdout = ByteArrayOutputStream()
+        val stderr = ByteArrayOutputStream()
+        val result =
+            execOperations.javaexec { spec ->
+                spec.classpath = objects.fileCollection().from(cliClasspath)
+                spec.mainClass.set(mainClass)
+                spec.args = args
+                spec.standardOutput = stdout
+                spec.errorOutput = stderr
+
+                // Capture non-zero exits ourselves so both stdout and stderr are included in the
+                // reported GradleException.
+                spec.isIgnoreExitValue = true
+            }
+        val stdoutText = stdout.toString(Charsets.UTF_8)
+        val stderrText = stderr.toString(Charsets.UTF_8)
+        if (result.exitValue != 0) {
+            throw GradleException(
+                "Published CLI smoke check ($mainClass ${args.joinToString(" ")}) failed with " +
+                    "exit code ${result.exitValue}.\nstdout:\n$stdoutText\nstderr:\n$stderrText"
+            )
+        }
+        if (expectedOutput != null && !stdoutText.contains(expectedOutput)) {
+            throw GradleException(
+                "Published CLI smoke check output did not contain '$expectedOutput'.\n" +
+                    "stdout:\n$stdoutText\nstderr:\n$stderrText"
+            )
+        }
+    }
+
     /** Returns true if [group] belongs to the Metalava group hierarchy. */
     private fun isMetalavaGroup(group: String): Boolean =
         group == METALAVA_GROUP || group.startsWith("$METALAVA_GROUP.")
+
+    /** Returns true if `(group, module)` matches any rule in [excludes]. */
+    private fun isExcluded(group: String, module: String, excludes: List<ModuleExclude>): Boolean =
+        excludes.any { rule ->
+            (rule.group == "*" || rule.group == group) &&
+                (rule.module == "*" || rule.module == module)
+        }
 
     /** Computes the lowercase hex SHA-256 digest of [file]. */
     private fun sha256Hex(file: File): String {
@@ -842,6 +1283,12 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
         return result
     }
 
+    /** Resolved published runtime classpath and transitive external coordinates for an artifact. */
+    private data class ResolvedPublishedRuntime(
+        val classpath: List<File>,
+        val externalCoords: Set<String>,
+    )
+
     /** Parsed view of a `.module` file's variants. */
     private data class ParsedModuleMetadata(val variants: Map<String, ParsedVariant>)
 
@@ -900,7 +1347,24 @@ abstract class VerifyPublishedArtifactsTask : DefaultTask() {
  * Registers the root [VERIFY_PUBLISHED_ARTIFACTS_TASK] task to verify published artifacts and
  * metadata in `out/dist/repo/m2repository` and `androidx_aggregate_build_info.txt`.
  */
-fun Project.setUpVerifyPublishedArtifactsTask() {
+fun Project.setUpVerifyPublishedArtifactsTask(
+    modelArtifactId: String? = "metalava-model",
+    modelSmokeCheckClasses: List<String> =
+        if (modelArtifactId != null) {
+            listOf(
+                "com.android.tools.metalava.model.Codebase",
+                "com.android.tools.metalava.model.ClassItem",
+                "com.android.tools.metalava.model.Item",
+            )
+        } else {
+            emptyList()
+        },
+    cliArtifactId: String? = "metalava",
+    cliMainClass: String? =
+        if (cliArtifactId != null) "com.android.tools.metalava.Driver" else null,
+    cliArgs: List<String> = listOf("--version"),
+    expectedToolProviderName: String? = if (cliArtifactId != null) "metalava" else null,
+) {
     // Register standard JVM attribute compatibility/disambiguation rules (e.g. TargetJvmVersion
     // 8 <= 17, TargetJvmEnvironment) on the root project without adding Java source sets or tasks.
     plugins.apply(JvmEcosystemPlugin::class.java)
@@ -959,7 +1423,8 @@ fun Project.setUpVerifyPublishedArtifactsTask() {
         tasks.register(VERIFY_PUBLISHED_ARTIFACTS_TASK, VerifyPublishedArtifactsTask::class.java) {
             task ->
             task.group = "verification"
-            task.description = "Verifies published Metalava Maven artifacts and metadata."
+            task.description =
+                "Verifies published Metalava Maven artifacts, metadata, and runtime smoke checks."
             task.m2RepositoryDirectory.set(
                 File(getDistributionDirectory(project), "repo/m2repository")
             )
@@ -967,9 +1432,27 @@ fun Project.setUpVerifyPublishedArtifactsTask() {
                 File(getDistributionDirectory(project), "androidx_aggregate_build_info.txt")
             )
             task.metalavaVersion.set(versionProvider)
+            task.externalArtifactFiles.from(externalView.map { it.files })
             task.externalCoordinateToFileKeys.set(externalCoordToFileKeys)
             task.externalTransitiveGraph.set(externalTransitiveGraph)
             task.externalCoordinateToVersion.set(externalCoordinateToVersion)
+
+            if (modelArtifactId != null) {
+                task.modelArtifactId.set(modelArtifactId)
+            }
+            task.modelSmokeCheckClasses.set(modelSmokeCheckClasses)
+
+            if (cliArtifactId != null) {
+                task.cliArtifactId.set(cliArtifactId)
+            }
+            if (cliMainClass != null) {
+                task.cliMainClass.set(cliMainClass)
+                task.expectedCliOutputSubstring.set(versionProvider)
+            }
+            task.cliArgs.set(cliArgs)
+            if (expectedToolProviderName != null) {
+                task.expectedToolProviderName.set(expectedToolProviderName)
+            }
             task.ideaSyncActive.set(
                 providers.systemProperty("idea.sync.active").map { it.toBoolean() }.orElse(false)
             )
@@ -994,9 +1477,21 @@ fun Project.setUpVerifyPublishedArtifactsTask() {
         }
 
         // Wait until subproject evaluation completes before deciding whether a project remained
-        // unpublished (and reading its final group).
+        // unpublished (and reading its final group and runtimeClasspath).
         subproject.afterEvaluate {
-            if (!subproject.plugins.hasPlugin(MavenPublishPlugin::class.java)) {
+            if (subproject.plugins.hasPlugin(MavenPublishPlugin::class.java)) {
+                val expectedExternalCoords =
+                    subproject.configurations
+                        .named("runtimeClasspath")
+                        .flatMap { config -> config.incoming.resolutionResult.rootComponent }
+                        .map { root -> collectExternalCoordinates(root) }
+                verifyTask.configure { task ->
+                    task.expectedRuntimeExternalCoordinates.put(
+                        subproject.name,
+                        expectedExternalCoords,
+                    )
+                }
+            } else {
                 val coord = "${subproject.group}:${subproject.name}"
                 verifyTask.configure { task -> task.unpublishedCoordinates.add(coord) }
             }
@@ -1048,6 +1543,10 @@ private fun buildExternalTransitiveGraph(root: ResolvedComponentResult): Map<Str
 
     return graph.mapValues { (_, deps) -> deps.toSet() }
 }
+
+/** Collects all external `"group:module"` coordinates reachable from [root]. */
+private fun collectExternalCoordinates(root: ResolvedComponentResult): Set<String> =
+    buildExternalTransitiveGraph(root).keys
 
 /**
  * Traverses [root] from a `ResolutionResult` and maps every resolved external `"group:module"`

@@ -419,6 +419,57 @@ class VerifyPublishedArtifactsTaskTest {
     }
 
     @Test
+    fun `verifyPublishedArtifacts fails if a published artifact omits an expected external runtime dependency`() {
+        val modelDir = sharedWorkspace.publishedArtifactDir("metalava-model")
+        val pomFile = File(modelDir, "metalava-model-$TEST_VERSION.pom")
+        val moduleFile = File(modelDir, "metalava-model-$TEST_VERSION.module")
+        withRestoredFile(pomFile) { originalPom ->
+            withRestoredFile(moduleFile) { originalModule ->
+                // Remove ext-api consistently from both .pom and .module so only the
+                // expectedRuntimeExternalCoordinates parity check detects the omission.
+                val updatedPom =
+                    originalPom.replace(
+                        Regex(
+                            """<dependency>\s*<groupId>com\.example</groupId>\s*<artifactId>ext-api</artifactId>.*?</dependency>""",
+                            RegexOption.DOT_MATCHES_ALL,
+                        ),
+                        "",
+                    )
+                check(updatedPom != originalPom) {
+                    "Expected ext-api dependency in POM:\n$originalPom"
+                }
+                pomFile.writeText(updatedPom)
+
+                val json = JsonParser.parseString(originalModule).asJsonObject
+                for (variantElem in json.getAsJsonArray("variants")) {
+                    val deps = variantElem.asJsonObject.getAsJsonArray("dependencies") ?: continue
+                    val filtered = JsonArray()
+                    for (depElem in deps) {
+                        if (depElem.asJsonObject.get("module").asString != "ext-api") {
+                            filtered.add(depElem)
+                        }
+                    }
+                    variantElem.asJsonObject.add("dependencies", filtered)
+                }
+                moduleFile.writeText(GsonBuilder().setPrettyPrinting().create().toJson(json))
+
+                val result =
+                    sharedWorkspace.runAndFail(
+                        "verifyPublishedArtifacts",
+                        "-x",
+                        "publishMetalavaPublicationToMavenRepository",
+                    )
+
+                // 'metalava' sorts before 'metalava-model' and transitively depends on it, so the
+                // runtime parity check catches the missing ext-api on 'metalava' first.
+                assertThat(result.output)
+                    .contains("Published runtime external dependencies for 'metalava' do not match")
+                assertThat(result.output).contains("Missing: [com.example:ext-api]")
+            }
+        }
+    }
+
+    @Test
     fun `verifyPublishedArtifacts fails if a published module file references an unpublished project`() {
         val moduleFile =
             File(
@@ -458,6 +509,108 @@ class VerifyPublishedArtifactsTaskTest {
                     "references unpublished Metalava coordinate " +
                         "'com.android.tools.metalava:metalava-model-api'"
                 )
+        }
+    }
+
+    @Test
+    fun `verifyPublishedArtifacts fails if a published module omits an external exclude rule`() {
+        val cliDir = sharedWorkspace.publishedArtifactDir("metalava")
+        val pomFile = File(cliDir, "metalava-$TEST_VERSION.pom")
+        val moduleFile = File(cliDir, "metalava-$TEST_VERSION.module")
+        withRestoredFile(pomFile) { originalPom ->
+            withRestoredFile(moduleFile) { originalModule ->
+                // Strip the exclude consistently from both .pom and .module so POM/module parity
+                // passes and resolvePublishedRuntimeClasspath catches the leaked ext-excluded.
+                val updatedPom =
+                    originalPom.replace(
+                        Regex(
+                            """(<artifactId>ext-parent</artifactId>.*?)(<exclusions>.*?</exclusions>)""",
+                            RegexOption.DOT_MATCHES_ALL,
+                        ),
+                        "$1",
+                    )
+                check(updatedPom != originalPom) {
+                    "Expected ext-parent <exclusions> in metalava.pom:\n$originalPom"
+                }
+                pomFile.writeText(updatedPom)
+
+                val json = JsonParser.parseString(originalModule).asJsonObject
+                val runtimeVariant =
+                    json
+                        .getAsJsonArray("variants")
+                        .map { it.asJsonObject }
+                        .first { it.get("name").asString == "runtimeElements" }
+                val extParentDep =
+                    runtimeVariant
+                        .getAsJsonArray("dependencies")
+                        .map { it.asJsonObject }
+                        .first { it.get("module").asString == "ext-parent" }
+                check(extParentDep.remove("excludes") != null) {
+                    "Expected ext-parent in metalava.module to carry excludes"
+                }
+                moduleFile.writeText(GsonBuilder().setPrettyPrinting().create().toJson(json))
+
+                val result =
+                    sharedWorkspace.runAndFail(
+                        "verifyPublishedArtifacts",
+                        "-x",
+                        "publishMetalavaPublicationToMavenRepository",
+                    )
+                assertThat(result.output)
+                    .contains("Published runtime external dependencies for 'metalava' do not match")
+                assertThat(result.output).contains("com.example:ext-excluded")
+            }
+        }
+    }
+
+    @Test
+    fun `verifyPublishedArtifacts fails if a published module omits an exclude on a Metalava dependency`() {
+        val cliDir = sharedWorkspace.publishedArtifactDir("metalava")
+        val pomFile = File(cliDir, "metalava-$TEST_VERSION.pom")
+        val moduleFile = File(cliDir, "metalava-$TEST_VERSION.module")
+        withRestoredFile(pomFile) { originalPom ->
+            withRestoredFile(moduleFile) { originalModule ->
+                // Strip the exclude on metalava-model from both .pom and .module so
+                // resolvePublishedRuntimeClasspath catches the leaked transitive ext-trans-child.
+                val updatedPom =
+                    originalPom.replace(
+                        Regex(
+                            """(<artifactId>metalava-model</artifactId>.*?)(<exclusions>.*?</exclusions>)""",
+                            RegexOption.DOT_MATCHES_ALL,
+                        ),
+                        "$1",
+                    )
+                check(updatedPom != originalPom) {
+                    "Expected metalava-model <exclusions> in metalava.pom:\n$originalPom"
+                }
+                pomFile.writeText(updatedPom)
+
+                val json = JsonParser.parseString(originalModule).asJsonObject
+                val runtimeVariant =
+                    json
+                        .getAsJsonArray("variants")
+                        .map { it.asJsonObject }
+                        .first { it.get("name").asString == "runtimeElements" }
+                val modelDep =
+                    runtimeVariant
+                        .getAsJsonArray("dependencies")
+                        .map { it.asJsonObject }
+                        .first { it.get("module").asString == "metalava-model" }
+                check(modelDep.remove("excludes") != null) {
+                    "Expected metalava-model in metalava.module to carry excludes"
+                }
+                moduleFile.writeText(GsonBuilder().setPrettyPrinting().create().toJson(json))
+
+                val result =
+                    sharedWorkspace.runAndFail(
+                        "verifyPublishedArtifacts",
+                        "-x",
+                        "publishMetalavaPublicationToMavenRepository",
+                    )
+                assertThat(result.output)
+                    .contains("Published runtime external dependencies for 'metalava' do not match")
+                assertThat(result.output).contains("com.example:ext-trans-child")
+            }
         }
     }
 
@@ -529,6 +682,46 @@ class VerifyPublishedArtifactsTaskTest {
     }
 
     @Test
+    fun `verifyPublishedArtifacts fails when a model smoke-check class is missing`() {
+        val result =
+            sharedWorkspace.runAndFail(
+                "verifyPublishedArtifacts",
+                "-PtestModelClasses=com.example.DoesNotExist",
+                "-x",
+                "publishMetalavaPublicationToMavenRepository",
+            )
+        assertThat(result.output)
+            .contains("Failed to load smoke-check class 'com.example.DoesNotExist'")
+    }
+
+    @Test
+    fun `verifyPublishedArtifacts fails when expected ToolProvider is missing`() {
+        val result =
+            sharedWorkspace.runAndFail(
+                "verifyPublishedArtifacts",
+                "-PtestToolProvider=missing-provider",
+                "-x",
+                "publishMetalavaPublicationToMavenRepository",
+            )
+        assertThat(result.output).contains("did not provide ToolProvider named 'missing-provider'")
+    }
+
+    @Test
+    fun `verifyPublishedArtifacts fails when CLI output does not contain expected text`() {
+        val result =
+            sharedWorkspace.runAndFail(
+                "verifyPublishedArtifacts",
+                "-PtestExpectedCliOutput=unexpected-version-banner",
+                "-x",
+                "publishMetalavaPublicationToMavenRepository",
+            )
+        assertThat(result.output)
+            .contains(
+                "Published CLI smoke check output did not contain 'unexpected-version-banner'"
+            )
+    }
+
+    @Test
     fun `verifyPublishedArtifacts fails when run under IDE sync`() {
         val result =
             sharedWorkspace.runAndFail(
@@ -541,6 +734,71 @@ class VerifyPublishedArtifactsTaskTest {
             )
         assertThat(result.output)
             .contains("Refusing to run publishing verification task ':verifyPublishedArtifacts'")
+    }
+
+    @Test
+    fun `setUpVerifyPublishedArtifactsTask supports disabling smoke checks and guards cliArtifactId`() {
+        val rootBuildScript =
+            """
+                plugins {
+                    id("metalava-build-plugin") apply false
+                }
+
+                import com.android.tools.metalava.buildinfo.setUpAggregateBuildInfoFileTask
+                import com.android.tools.metalava.setUpVerifyPublishedArtifactsTask
+
+                setUpAggregateBuildInfoFileTask()
+                if (providers.gradleProperty("testCliWithoutChecks").orNull == "true") {
+                    setUpVerifyPublishedArtifactsTask(
+                        modelArtifactId = null,
+                        cliArtifactId = "simple-lib",
+                        cliMainClass = null,
+                        expectedToolProviderName = null,
+                    )
+                } else {
+                    // Omitting modelArtifactId and cliArtifactId must cleanly disable both smoke
+                    // checks without triggering partial-configuration errors.
+                    setUpVerifyPublishedArtifactsTask(
+                        modelArtifactId = null,
+                        cliArtifactId = null,
+                    )
+                }
+            """
+                .trimIndent()
+
+        val workspace = TestMetalavaWorkspace.create(tempFolder, rootBuildScript = rootBuildScript)
+        workspace.addSubproject(
+            path = ":simple-lib",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("metalava-build-plugin")
+                        id("maven-publish")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/java/com/example/simple/Simple.java" to
+                        "package com.example.simple; public class Simple {}"
+                ),
+        )
+
+        workspace.run("verifyPublishedArtifacts")
+
+        val badCliResult =
+            workspace.runAndFail(
+                "verifyPublishedArtifacts",
+                "-PtestCliWithoutChecks=true",
+                "-x",
+                "publishMetalavaPublicationToMavenRepository",
+            )
+        assertThat(badCliResult.output)
+            .contains(
+                "cliArtifactId 'simple-lib' was configured without cliMainClass or " +
+                    "expectedToolProviderName."
+            )
     }
 
     /** Executes [block] with [file]'s original UTF-8 text and restores [file] in `finally`. */
@@ -588,11 +846,42 @@ class VerifyPublishedArtifactsTaskTest {
                         id("metalava-build-plugin") apply false
                     }
 
+                    import com.android.tools.metalava.VERIFY_PUBLISHED_ARTIFACTS_TASK
+                    import com.android.tools.metalava.VerifyPublishedArtifactsTask
                     import com.android.tools.metalava.buildinfo.setUpAggregateBuildInfoFileTask
                     import com.android.tools.metalava.setUpVerifyPublishedArtifactsTask
 
                     setUpAggregateBuildInfoFileTask()
-                    setUpVerifyPublishedArtifactsTask()
+                    val classesOverride =
+                        providers.gradleProperty("testModelClasses").orNull
+                            ?.split(",")
+                            ?.filter { it.isNotBlank() }
+                    val toolProviderOverride =
+                        providers.gradleProperty("testToolProvider").orNull
+                    val expectedOutputOverride =
+                        providers.gradleProperty("testExpectedCliOutput").orNull
+
+                    setUpVerifyPublishedArtifactsTask(
+                        modelArtifactId = "metalava-model",
+                        modelSmokeCheckClasses =
+                            classesOverride
+                                ?: listOf(
+                                    "com.android.tools.metalava.api.model.ApiItem",
+                                    "com.android.tools.metalava.model.ClassItem",
+                                ),
+                        cliArtifactId = "metalava",
+                        cliMainClass = "com.android.tools.metalava.Driver",
+                        cliArgs = listOf("--version"),
+                        expectedToolProviderName = toolProviderOverride ?: "metalava",
+                    )
+                    if (expectedOutputOverride != null) {
+                        tasks.named(
+                            VERIFY_PUBLISHED_ARTIFACTS_TASK,
+                            VerifyPublishedArtifactsTask::class.java,
+                        ) {
+                            expectedCliOutputSubstring.set(expectedOutputOverride)
+                        }
+                    }
                 """
                     .trimIndent()
 
@@ -639,6 +928,23 @@ class VerifyPublishedArtifactsTaskTest {
                         .trimIndent(),
                 dependencies = listOf("com.example:ext-excluded:1.0.0"),
             )
+            workspace.publishExternalLibrary(
+                group = "com.example",
+                artifact = "ext-trans-child",
+                version = "1.0.0",
+                packageName = "com.example.transchild",
+                className = "ExtTransChild",
+                source = "package com.example.transchild; public class ExtTransChild {}",
+            )
+            workspace.publishExternalLibrary(
+                group = "com.example",
+                artifact = "ext-trans-parent",
+                version = "1.0.0",
+                packageName = "com.example.transparent",
+                className = "ExtTransParent",
+                source = "package com.example.transparent; public class ExtTransParent {}",
+                dependencies = listOf("com.example:ext-trans-child:1.0.0"),
+            )
 
             workspace.addSubproject(
                 path = ":metalava-model-api",
@@ -684,6 +990,7 @@ class VerifyPublishedArtifactsTaskTest {
                         }
                         dependencies {
                             embedApi(project(":metalava-model-api"))
+                            implementation("com.example:ext-trans-parent:1.0.0")
                         }
                     """
                         .trimIndent(),
@@ -741,7 +1048,9 @@ class VerifyPublishedArtifactsTaskTest {
                             mainClass.set("com.android.tools.metalava.Driver")
                         }
                         dependencies {
-                            implementation(project(":metalava-model"))
+                            implementation(project(":metalava-model")) {
+                                exclude(group = "com.example", module = "ext-trans-child")
+                            }
                             embedImplementation(project(":metalava-feature"))
                             implementation("com.example:ext-parent:1.0.0") {
                                 exclude(group = "com.example", module = "ext-excluded")
