@@ -42,8 +42,10 @@ import org.gradle.kotlin.dsl.get
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.setEnvironment
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.plugin.KotlinBasePluginWrapper
+import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.File
 import java.io.StringReader
@@ -63,6 +65,36 @@ class MetalavaBuildPlugin : Plugin<Project> {
                     }
                 }
                 is KotlinBasePluginWrapper -> {
+                    // Derive Kotlin module names from the full Gradle project path using '.' as
+                    // the path separator (e.g. ":metalava:model" -> "metalava.model") so nested
+                    // subprojects never collide with hyphenated top-level subprojects such as
+                    // ":metalava-model", while keeping all top-level .kotlin_module names
+                    // unchanged.
+                    val projectModuleName =
+                        project.path.removePrefix(":").replace(":", ".").ifEmpty { project.name }
+                    project.extensions
+                        .findByType(KotlinJvmProjectExtension::class.java)
+                        ?.target
+                        ?.compilations
+                        ?.configureEach { compilation ->
+                            // Preserve existing module names for top-level main compilations while
+                            // keeping non-main compilations (test, testFixtures) distinct.
+                            val compilationModuleName =
+                                if (compilation.name == KotlinCompilation.MAIN_COMPILATION_NAME) {
+                                    projectModuleName
+                                } else {
+                                    "${projectModuleName}_${compilation.name}"
+                                }
+
+                            // Configure moduleName on the compile task rather than the deprecated
+                            // compilation.compilerOptions API (which fails under -Werror).
+                            compilation.compileTaskProvider.configure { task ->
+                                if (task is KotlinCompile) {
+                                    task.compilerOptions.moduleName.set(compilationModuleName)
+                                }
+                            }
+                        }
+
                     project.tasks.withType(KotlinCompile::class.java).configureEach { task ->
                         task.compilerOptions.apply {
                             jvmTarget.set(JvmTarget.JVM_17)
