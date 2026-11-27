@@ -134,6 +134,7 @@ class MetalavaBuildPlugin : Plugin<Project> {
 
         configureLint(project)
         configureTestTasks(project)
+        configureEmbedding(project)
         project.configureKtfmt()
     }
 
