@@ -61,6 +61,42 @@ kotlin {
 }
 
 tasks.withType<Test>().configureEach {
+    // Normalize relative METALAVA_PREBUILTS_REPOS entries against tools/metalava (rather than
+    // buildSrc/) because TestKit writes them into generated settings.gradle.kts files inside
+    // temporary directories.
+    val rootProjectDir = layout.projectDirectory.dir("..").asFile
+    val defaultPrebuiltsDir =
+        layout.projectDirectory.dir("../../../prebuilts/metalava").asFile.canonicalPath
+    val prebuiltsReposProvider =
+        providers
+            .environmentVariable("METALAVA_PREBUILTS_REPOS")
+            .map { raw ->
+                raw.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .joinToString(",") { path ->
+                        val file = File(path)
+                        (if (file.isAbsolute) file else File(rootProjectDir, path)).canonicalPath
+                    }
+            }
+            .orElse(defaultPrebuiltsDir)
+    val downloadDependenciesProvider =
+        providers.environmentVariable("DOWNLOAD_DEPENDENCIES").orElse("false")
+    val kotlinVersion = libs.versions.kotlin.get()
+
+    // Cap parallel forks to at most 3 because each TestKit worker starts/reuses a Gradle daemon;
+    // this runs the 3 buildSrc test classes concurrently without excessive daemon memory pressure.
+    maxHeapSize = "1024m"
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 3)
+
+    // Track behavioral properties as task inputs, but populate machine-specific repository paths
+    // inside doFirst so the buildSrc:test cache key remains relocatable across checkouts.
+    inputs.property("kotlinVersion", kotlinVersion)
+    inputs.property("downloadDependencies", downloadDependenciesProvider)
+    doFirst {
+        systemProperty("metalava.prebuilts.repos", prebuiltsReposProvider.get())
+        systemProperty("metalava.download.dependencies", downloadDependenciesProvider.get())
+    }
     testLogging {
         events = hashSetOf(TestLogEvent.FAILED, TestLogEvent.STANDARD_ERROR)
         exceptionFormat = TestExceptionFormat.FULL
