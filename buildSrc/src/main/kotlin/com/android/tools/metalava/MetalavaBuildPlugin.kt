@@ -53,6 +53,27 @@ import java.util.Properties
 
 class MetalavaBuildPlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        // Assign version and group before registering plugin callbacks so plugins applied before
+        // metalava-build-plugin (such as maven-publish) observe the final coordinates immediately.
+        project.version = project.getMetalavaVersion()
+
+        // Include parent project path segments in the group for nested subprojects (e.g.
+        // ":nested:leaf" -> "com.android.tools.metalava.nested") so two nested subprojects sharing
+        // a leaf name do not collide on Gradle module coordinates during dependency resolution.
+        // Published projects must be top-level under "com.android.tools.metalava" (enforced in
+        // configurePublishing).
+        val parentPath =
+            project.path
+                .substringBeforeLast(":", missingDelimiterValue = "")
+                .removePrefix(":")
+                .replace(":", ".")
+        project.group =
+            if (parentPath.isEmpty()) {
+                "com.android.tools.metalava"
+            } else {
+                "com.android.tools.metalava.$parentPath"
+            }
+
         project.plugins.all { plugin ->
             when (plugin) {
                 is JavaPlugin -> {
@@ -114,8 +135,6 @@ class MetalavaBuildPlugin : Plugin<Project> {
         configureLint(project)
         configureTestTasks(project)
         project.configureKtfmt()
-        project.version = project.getMetalavaVersion()
-        project.group = "com.android.tools.metalava"
     }
 
     private fun configureLint(project: Project) {
@@ -260,6 +279,22 @@ class MetalavaBuildPlugin : Plugin<Project> {
     }
 
     private fun configurePublishing(project: Project) {
+        // Reject nested (and root) subprojects unconditionally by project path so overriding
+        // project.group in a nested build script cannot bypass flat-group publishing rules and
+        // reintroduce leaf-name collisions.
+        check(project.path != ":" && project.path.lastIndexOf(':') == 0) {
+            "Nested Metalava subproject '${project.path}' cannot be published; only top-level " +
+                "projects may apply 'maven-publish'."
+        }
+
+        // Guard in afterEvaluate against a top-level published project overriding project.group.
+        project.afterEvaluate {
+            check(project.group == "com.android.tools.metalava") {
+                "Published Metalava project '${project.path}' must use group " +
+                    "'com.android.tools.metalava', but has '${project.group}'."
+            }
+        }
+
         val projectRepo = project.layout.buildDirectory.dir("repo")
         val archiveTaskProvider =
             configurePublishingArchive(
