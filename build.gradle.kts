@@ -21,6 +21,7 @@ import com.android.tools.metalava.buildinfo.setUpAggregateBuildInfoFileTask
 
 defaultTasks =
     mutableListOf(
+        "buildSrc:test",
         "installDist",
         "test",
         "publish",

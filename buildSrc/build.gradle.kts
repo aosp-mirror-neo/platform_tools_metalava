@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -27,6 +29,10 @@ dependencies {
     implementation(libs.kotlinGradlePlugin)
     implementation(libs.androidGradlePlugin)
     implementation(libs.gson)
+
+    testImplementation(gradleTestKit())
+    testImplementation(libs.junit4)
+    testImplementation(libs.truth)
 }
 
 gradlePlugin {
@@ -51,5 +57,12 @@ kotlin {
     compilerOptions {
         jvmTarget = JvmTarget.JVM_17
         allWarningsAsErrors = true
+    }
+}
+
+tasks.withType<Test>().configureEach {
+    testLogging {
+        events = hashSetOf(TestLogEvent.FAILED, TestLogEvent.STANDARD_ERROR)
+        exceptionFormat = TestExceptionFormat.FULL
     }
 }
