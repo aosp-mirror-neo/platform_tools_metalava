@@ -16,10 +16,12 @@
 
 package com.android.tools.metalava
 
+import com.android.tools.metalava.buildinfo.CreateLibraryBuildInfoTask
 import com.android.tools.metalava.buildinfo.setBuildInfoAttributes
 import java.nio.file.Path
 import org.gradle.api.GradleException
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.DependencySet
 import org.gradle.api.artifacts.ExcludeRule
@@ -46,6 +48,9 @@ import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.provider.Provider
 import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
+import org.gradle.api.publish.maven.tasks.AbstractPublishToMaven
+import org.gradle.api.publish.maven.tasks.GenerateMavenPom
+import org.gradle.api.publish.tasks.GenerateModuleMetadata
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.application.CreateStartScripts
 import org.gradle.api.tasks.bundling.Jar
@@ -116,11 +121,20 @@ private val LOCAL_EMBED_CLASSPATH_CONFIGS =
  *   appropriate scope. Note: because Gradle's `ResolutionResult` does not expose per-dependency
  *   `ExcludeRule`s on transitive edges, any `exclude(...)` rule for an embedded project's external
  *   boundary dependency must be declared on the host project (where it is preserved across
- *   promotion).
+ *   promotion and verified by `verifyPublishedArtifacts`).
  * - Filter embedded subproject JARs out of `application` distributions (`installDist`, `distZip`,
  *   `distTar`, and `startScripts`).
+ * - Export `embedApi` / `embedImplementation` modules directly during IntelliJ Gradle sync
+ *   (`-Didea.sync.active=true`) while blocking publishing and build-info tasks during IDE sync.
  */
 internal fun configureEmbedding(project: Project) {
+    val isIdeaSyncProvider =
+        project.providers.systemProperty("idea.sync.active").map { it.toBoolean() }.orElse(false)
+
+    // Guard publishing and build-info tasks against running under IDE sync where apiElements and
+    // runtimeElements export embedded projects directly for editor navigation.
+    configureIdeaSyncPublishingGuards(project, isIdeaSyncProvider)
+
     project.plugins.withType(JavaPlugin::class.java) {
         val embedImplementation =
             project.configurations.dependencyScope(EMBED_IMPLEMENTATION_CONFIGURATION)
@@ -164,7 +178,10 @@ internal fun configureEmbedding(project: Project) {
                 val embedApi = project.configurations.findByName(EMBED_API_CONFIGURATION)
                 val hasEmbedApi = embedApi?.dependencies?.isNotEmpty() == true
                 val hasEmbedImpl = embedImplementation.get().dependencies.isNotEmpty()
-                if (!hasEmbedApi && !hasEmbedImpl) {
+
+                // Skip boundary promotion during IDE sync because runtimeElements extends
+                // embedApi/embedImplementation directly (publishing is blocked separately).
+                if (isIdeaSyncProvider.get() || (!hasEmbedApi && !hasEmbedImpl)) {
                     return@withDependencies
                 }
                 promoteBoundaryDependencies(
@@ -202,17 +219,37 @@ internal fun configureEmbedding(project: Project) {
 
             validateEmbedDeclarations(project, embedApi, embedImpl)
 
-            // Remove unmerged secondary variants so downstream compile and runtime consumers
-            // (including ArtifactView consumers such as com.android.lint) resolve the merged JAR
-            // rather than unmerged host output directories.
-            if (hasEmbedApi) {
-                project.configurations.named("apiElements").configure { apiElements ->
-                    apiElements.outgoing.variants.removeIf { it.name == "classes" }
+            if (isIdeaSyncProvider.get()) {
+                // During IntelliJ sync, mirror java-library's api/implementation outgoing wiring
+                // and retain classes/resources secondary variants so IDEA imports embedded API
+                // modules with COMPILE (EXPORTED) scope and embedded impl modules with RUNTIME
+                // scope on downstream modules.
+                if (hasEmbedApi) {
+                    project.configurations.named("apiElements").configure { apiElements ->
+                        apiElements.extendsFrom(embedApi)
+                    }
                 }
-            }
-            runtimeElements.configure { runtime ->
-                runtime.outgoing.variants.removeIf {
-                    it.name == "classes" || it.name == "resources"
+                runtimeElements.configure { runtime ->
+                    if (hasEmbedApi) {
+                        runtime.extendsFrom(embedApi)
+                    }
+                    if (hasEmbedImpl) {
+                        runtime.extendsFrom(embedImpl)
+                    }
+                }
+            } else {
+                // Remove unmerged secondary variants so downstream compile and runtime consumers
+                // (including ArtifactView consumers such as com.android.lint) resolve the merged
+                // JAR rather than unmerged host output directories.
+                if (hasEmbedApi) {
+                    project.configurations.named("apiElements").configure { apiElements ->
+                        apiElements.outgoing.variants.removeIf { it.name == "classes" }
+                    }
+                }
+                runtimeElements.configure { runtime ->
+                    runtime.outgoing.variants.removeIf {
+                        it.name == "classes" || it.name == "resources"
+                    }
                 }
             }
 
@@ -254,7 +291,9 @@ internal fun configureEmbedding(project: Project) {
         apiElements.configure { it.extendsFrom(embedPromotedApi.get()) }
         embedPromotedApi.configure { promoted ->
             promoted.withDependencies { targetDeps ->
-                if (embedApi.get().dependencies.isEmpty()) {
+                // Skip boundary promotion during IDE sync because apiElements extends embedApi
+                // directly for IDEA module export (publishing is blocked separately).
+                if (isIdeaSyncProvider.get() || embedApi.get().dependencies.isEmpty()) {
                     return@withDependencies
                 }
                 promoteBoundaryDependencies(
@@ -270,6 +309,38 @@ internal fun configureEmbedding(project: Project) {
             }
         }
     }
+}
+
+/**
+ * Registers fail-fast guards on publishing and build-info tasks so IDE sync metadata overrides can
+ * never leak into published `.pom`, `.module`, or `build_info.txt` outputs.
+ */
+private fun configureIdeaSyncPublishingGuards(
+    project: Project,
+    isIdeaSyncProvider: Provider<Boolean>,
+) {
+    val guardAction: (Task) -> Unit = { task ->
+        // Capture taskPath outside task callbacks so Configuration Cache does not retain Task or
+        // Project references. Force the task out of UP-TO-DATE during IDE sync so tasks with
+        // @OutputFile (GenerateMavenPom, GenerateModuleMetadata, CreateLibraryBuildInfoTask) still
+        // execute doFirst and fail fast instead of being skipped silently.
+        val taskPath = task.path
+        task.outputs.upToDateWhen { !isIdeaSyncProvider.get() }
+        task.doFirst {
+            if (isIdeaSyncProvider.get()) {
+                throw GradleException(
+                    "Refusing to run publishing or build-info task '$taskPath' while " +
+                        "'idea.sync.active=true' because IDE sync alters embedded dependency " +
+                        "metadata."
+                )
+            }
+        }
+    }
+
+    project.tasks.withType(GenerateMavenPom::class.java).configureEach(guardAction)
+    project.tasks.withType(GenerateModuleMetadata::class.java).configureEach(guardAction)
+    project.tasks.withType(AbstractPublishToMaven::class.java).configureEach(guardAction)
+    project.tasks.withType(CreateLibraryBuildInfoTask::class.java).configureEach(guardAction)
 }
 
 /**

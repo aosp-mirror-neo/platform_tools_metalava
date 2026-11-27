@@ -1856,6 +1856,145 @@ class ProjectEmbeddingTest {
     }
 
     @Test
+    fun `IDE sync exports embedApi directly and blocks publishing and buildInfo`() {
+        val workspace = TestMetalavaWorkspace.create(tempFolder)
+        workspace.addSubproject(
+            path = ":embedded-api",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("metalava-build-plugin")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/java/com/example/api/Api.java" to
+                        "package com.example.api; public interface Api {}"
+                ),
+        )
+        workspace.addSubproject(
+            path = ":embedded-impl",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("metalava-build-plugin")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/java/com/example/impl/Impl.java" to
+                        "package com.example.impl; public class Impl {}"
+                ),
+        )
+        workspace.addSubproject(
+            path = ":host",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("metalava-build-plugin")
+                        id("maven-publish")
+                    }
+                    dependencies {
+                        embedApi(project(":embedded-api"))
+                        embedImplementation(project(":embedded-impl"))
+                    }
+                    tasks.register("inspectOutgoing") {
+                        val apiVariantNames =
+                            configurations.named("apiElements").map { config ->
+                                config.outgoing.variants.names.sorted()
+                            }
+                        val apiExtendsNames =
+                            configurations.named("apiElements").map { config ->
+                                config.extendsFrom.map { it.name }.sorted()
+                            }
+                        val runtimeVariantNames =
+                            configurations.named("runtimeElements").map { config ->
+                                config.outgoing.variants.names.sorted()
+                            }
+                        val runtimeExtendsNames =
+                            configurations.named("runtimeElements").map { config ->
+                                config.extendsFrom.map { it.name }.sorted()
+                            }
+                        doLast {
+                            println("API_VARIANTS=" + apiVariantNames.get().joinToString(","))
+                            println("API_EXTENDS=" + apiExtendsNames.get().joinToString(","))
+                            println("RT_VARIANTS=" + runtimeVariantNames.get().joinToString(","))
+                            println("RT_EXTENDS=" + runtimeExtendsNames.get().joinToString(","))
+                        }
+                    }
+                """
+                    .trimIndent(),
+        )
+        workspace.addSubproject(
+            path = ":plain-host",
+            buildScript =
+                """
+                    plugins {
+                        `java-library`
+                        id("metalava-build-plugin")
+                        id("maven-publish")
+                    }
+                """
+                    .trimIndent(),
+            sources =
+                mapOf(
+                    "src/main/java/com/example/plain/Plain.java" to
+                        "package com.example.plain; public class Plain {}"
+                ),
+        )
+
+        // Normal CLI build strips unmerged variants and does not extend embedApi/embedImpl.
+        val cliInspect = workspace.run(":host:inspectOutgoing")
+        assertThat(extractPrefixedValues(cliInspect.output, "API_VARIANTS="))
+            .doesNotContain("classes")
+        assertThat(extractPrefixedValues(cliInspect.output, "API_EXTENDS="))
+            .doesNotContain("embedApi")
+        val cliRtVariants = extractPrefixedValues(cliInspect.output, "RT_VARIANTS=")
+        assertThat(cliRtVariants).doesNotContain("classes")
+        assertThat(cliRtVariants).doesNotContain("resources")
+        val cliRtExtends = extractPrefixedValues(cliInspect.output, "RT_EXTENDS=")
+        assertThat(cliRtExtends).doesNotContain("embedApi")
+        assertThat(cliRtExtends).doesNotContain("embedImplementation")
+
+        // IDE sync retains classes/resources variants and mirrors java-library's outgoing wiring
+        // for both apiElements and runtimeElements.
+        val ideaInspect = workspace.run(":host:inspectOutgoing", "-Didea.sync.active=true")
+        assertThat(extractPrefixedValues(ideaInspect.output, "API_VARIANTS=")).contains("classes")
+        assertThat(extractPrefixedValues(ideaInspect.output, "API_EXTENDS=")).contains("embedApi")
+        assertThat(extractPrefixedValues(ideaInspect.output, "RT_VARIANTS="))
+            .containsAtLeast("classes", "resources")
+        assertThat(extractPrefixedValues(ideaInspect.output, "RT_EXTENDS="))
+            .containsAtLeast("embedApi", "embedImplementation")
+
+        // Pre-populate @OutputFile tasks via a normal CLI build so they would normally be
+        // UP-TO-DATE, then verify -Didea.sync.active=true still forces them to fail fast rather
+        // than skipping doFirst as UP-TO-DATE.
+        workspace.run(
+            ":host:createBuildInfo",
+            ":host:generatePomFileForMetalavaPublication",
+            ":host:generateMetadataFileForMetalavaPublication",
+            ":plain-host:createBuildInfo",
+        )
+
+        for (task in
+            listOf(
+                ":host:publish",
+                ":host:createBuildInfo",
+                ":host:generatePomFileForMetalavaPublication",
+                ":host:generateMetadataFileForMetalavaPublication",
+                ":plain-host:createBuildInfo",
+            )) {
+            val failResult = workspace.runAndFail(task, "-Didea.sync.active=true")
+            assertThat(failResult.output).contains("Refusing to run publishing or build-info task")
+        }
+    }
+
+    @Test
     fun `configuration cache is reused and MergeServiceFilesTask is served from build cache`() {
         val workspace = TestMetalavaWorkspace.create(tempFolder)
         workspace.addSubproject(
