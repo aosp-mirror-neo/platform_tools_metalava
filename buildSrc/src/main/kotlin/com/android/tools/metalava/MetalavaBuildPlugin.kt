@@ -399,18 +399,19 @@ private class VersionProviderWrapper(val versionProvider: Provider<String>) {
     }
 }
 
-private fun Project.getMetalavaVersion(): VersionProviderWrapper {
+/** Reads the `metalavaVersion` property from the root `version.properties` file lazily. */
+internal fun Project.readMetalavaVersion(): Provider<String> {
     val contents =
-        providers.fileContents(
-            isolated.rootProject.projectDirectory.file("version.properties")
-        )
-    return VersionProviderWrapper(
-        contents.asText.map {
-            val versionProps = Properties()
-            versionProps.load(StringReader(it))
-            versionProps["metalavaVersion"]!! as String
-        }
-    )
+        providers.fileContents(isolated.rootProject.projectDirectory.file("version.properties"))
+    return contents.asText.map {
+        val versionProps = Properties()
+        versionProps.load(StringReader(it))
+        versionProps["metalavaVersion"]!! as String
+    }
+}
+
+private fun Project.getMetalavaVersion(): VersionProviderWrapper {
+    return VersionProviderWrapper(readMetalavaVersion())
 }
 
 /**
